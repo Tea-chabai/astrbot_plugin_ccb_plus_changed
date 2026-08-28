@@ -30,6 +30,25 @@
     "default": 0.1,
     "hint": "每次 CCB 完成后，有多大概率阳痿。"
   },
+  "faint_prob": {
+    "description": "昏厥概率",
+    "type": "float",
+    "default": 0.2,
+    "hint": "ccb或道观时晕倒概率。"
+    },
+  "dj_faint_prob": {
+    "description": "打胶/自扣昏厥概率",
+    "type": "float",
+    "default": 0.15,
+    "hint": "每次 /dj 或自扣完成后，有多大概率昏厥。"
+    },
+  "dj_mode": {
+    "description": "/dj 行为模式",
+    "type": "string",
+    "default": "B",
+    "options": ["B", "d"],
+    "hint": "B=扣B（默认，记录13水）；d=打胶（记录生命因子）。ccbinfo/djtop/djmax 的数据与显示跟随此配置。"
+    },
   "yw_prob_first": {
     "description": "首次阳痿概率",
     "type": "float",
@@ -48,17 +67,11 @@
     "default": 0.2,
     "hint": "ccb时暴击的概率。"
   },
-    "faint_prob": {
-    "description": "昏厥概率",
-    "type": "float",
-    "default": 0.2,
-    "hint": "ccb或道观时晕倒概率。"
-    },
   "white_list": {
-    "description": "不能进行ccb的id列表",
+    "description": "禁C名单：不能被动C也不能主动C别人",
     "type": "list",
     "default": [],
-    "hint": "当目标在此列表中时，不能对其ccb。"
+    "hint": "列表中的用户既不能被ccb，也不能发起ccb（仍可使用 /dj 打胶）。"
   },
   "self_ccb": {
     "description": "是否允许0721或者打胶",
@@ -69,7 +82,7 @@
   "is_log": {
     "description": "完整日志记录",
     "type": "bool",
-    "default": "false",
+    "default": false,
     "hint": "是否独立保留每一条ccb记录，包括双方与注入量。"
   },
   "faint_random_min": {
