@@ -296,15 +296,14 @@ class ccb(Star):
 
     def _self_play(self, group_id: str, send_id: str, user_name: str, faint_time: float) -> list:
         """
-        自交（0721）：跟随配置模式——扣B=记录13水/触发昏厥，打胶=记录生命因子/触发阳痿（贤者模式）。
-        不改变被C记录与处女状态。用于 ccb 指令未指定目标且 self_ccb 开启时。返回待发送的消息链。
+        自扣（0721）：固定为扣B（13水）行为，触发后昏厥（扣晕），不跟随 dj_mode。
+        不改变被C记录与处女状态。用于 ccb / bh 未指定目标且 self_ccb 开启时。返回待发送的消息链。
         """
         duration = round(random.uniform(0.1, 60), 2)
         V = round(random.uniform(0.01, 100), 2)
         now = time.time()
-        is_d = self.dj_mode == "d"
 
-        rec, _ = self._record_dj_stats(group_id, send_id, V)
+        rec, _ = self._record_dj_stats(group_id, send_id, V, mode="B")
 
         if self.is_log:
             try:
@@ -312,29 +311,14 @@ class ccb(Star):
             except Exception as e:
                 logger.warning(f"记录日志失败: {e}")
 
-        if is_d:
-            # 打胶（生命因子）：back.py 文案特供，触发后进入阳痿
-            timep = round(random.uniform(1, 666), 2)
-            a = time_long(timep)
-            b = volume(V)
-            head = f" {user_name}, 你坚持了{timep}s哦，{a}.射出了{V:.2f}ml的生命因子,{b}!"
-            stat = f"这是ta的第{rec[d_num]}次。ta累计射出了{rec[d_vol]}ml的生命因子。\n"
-            tail = None
-            if random.random() < self.dj_faint_prob:
-                self.ban_list[send_id] = now + self.ban_duration
-                remain = int(self.ban_duration)
-                m, s = divmod(remain, 60)
-                tail = f"同时{user_name}射空了，进入贤者模式（电子阳痿，剩余 {m}分{s}秒）"
-        else:
-            # 扣B（13水）：触发后昏厥
-            head = f"{user_name} 刚刚扣了{duration}min长的13 ，喷出了{V:.2f}ml的13水"
-            stat = f"这是ta的第{rec[a10]}次。ta累积喷出了{rec[a8]}ml的13水。\n"
-            tail = None
-            if random.random() < self.dj_faint_prob:
-                self.faint_list[send_id] = now + faint_time
-                remain = int(faint_time)
-                m, s = divmod(remain, 60)
-                tail = f"同时{user_name}不小心扣晕了,接下来ta什么也干不了（剩余 {m}分{s}秒）"
+        head = f"{user_name} 刚刚扣了{duration}min长的13 ，喷出了{V:.2f}ml的13水"
+        stat = f"这是ta的第{rec[a10]}次。ta累积喷出了{rec[a8]}ml的13水。\n"
+        tail = None
+        if random.random() < self.dj_faint_prob:
+            self.faint_list[send_id] = now + faint_time
+            remain = int(faint_time)
+            m, s = divmod(remain, 60)
+            tail = f"同时{user_name}不小心扣晕了,接下来ta什么也干不了（剩余 {m}分{s}秒）"
 
         chain = [
             Comp.Plain(head),
