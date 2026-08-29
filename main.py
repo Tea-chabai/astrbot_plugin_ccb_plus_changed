@@ -22,7 +22,7 @@ DJ_B_DATA_FILE = "data/dj_b.json"    # 扣B（13水）数据，独立文件
 BH_DATA_FILE = "data/bh.json"        # 百合（互扣）数据，独立文件
 
 HELP_INFO = """
-/ccb ccb，顾名思义，用来ccb 用法： ccb [@]，如果不带有@某人则根据配置文件进行自交或者打胶
+/ccb ccb，顾名思义，用来ccb 用法： ccb [@或QQ号]，如果不带有@某人则根据配置文件进行自交或者打胶
 /ccbinfo  查询某人ccb信息：第一次对他ccb的人，被ccb的总次数，注入总量，用法：ccbinfo [@目标]
 /ccbtop 按次数排行
 /ccbmax 按max值排行并输出产生者
@@ -31,11 +31,11 @@ HELP_INFO = """
 /dj 自交功能：按配置文件模式执行（B=扣B记录13水，d=打胶记录生命因子），不改变处女状态，可能昏厥（概率可配置）
 /djtop 自交榜：按自交次数排行（数据按配置模式）
 /djmax 自交榜：按单次最高排行（数据按配置模式）
-/bh 百合：和群友互扣，被扣的人喷出B水并记录，用法：bh [@目标]
+/bh 百合：和群友互扣，被扣的人喷出B水并记录，用法：bh [@目标或QQ号]
 /bhtop 百合榜：按被扣次数排行
 /ccbclear   管理员指令：清除某人的所有 CCB 记录，用法：ccbclear [@目标]
-/ccbnodo  管理员指令：切换目标禁C状态，用法：ccbnodo [@目标]（禁C者不能主动C别人、也不能被C，但仍可自交）
-/timeclean   管理员指令：强制结束指定用户的阳痿/昏厥冷却，用法：timeclean [@目标]（不带@默认清除自己）
+/ccbnodo  管理员指令：切换目标禁C状态，用法：ccbnodo [@目标或QQ号]（禁C者不能主动C别人、也不能被C，但仍可自交）
+/timeclean   管理员指令：强制结束指定用户的虚弱/昏厥冷却，用法：timeclean [@目标]（不带@默认清除自己）
 
 根据配置文件可调控炸膛的概率
 
@@ -66,7 +66,7 @@ def makeit(group_data, target_user_id):
     """1 = 已被C过（处女状态已破），2 = 处女/无被C记录（只打过胶不算破处）"""
     for item in group_data:
         if item.get(a1) == target_user_id:
-            return 1 if int(item.get(a2, 0)) > 0 else 2
+            return 1 if int(item.get(a2, 0) or 0) > 0 else 2
     return 2
 
 @register("ccb", "Koikokokokoro", "和群友赛博sex的插件PLUS", "1.1.4")
@@ -134,6 +134,32 @@ class ccb(Star):
              if isinstance(seg, Comp.At) and str(seg.qq) != self_id),
             str(event.get_sender_id())
         )
+
+    # 目标解析：优先@，其次命令参数中的QQ号（需验证在本群），默认自己。返回 (target_id, error_msg)
+    async def _resolve_target(self, event: AstrMessageEvent, messages: str, group_id: str) -> tuple:
+        for seg in event.get_messages():
+            if isinstance(seg, Comp.At) and str(seg.qq) != str(event.get_self_id()):
+                return str(seg.qq), None
+        # 仅把5位及以上的纯数字视为QQ号（QQ号最低5位，过滤掉梗数字等短数字）
+        parts = [p for p in str(messages).split() if p.isdigit() and len(p) >= 5]
+        if parts:
+            qq = parts[0]
+            if not await self._is_in_group(event, group_id, qq):
+                return None, f"{event.get_sender_name()}，神明的小本本没有记录id为{qq}的ta呢"
+            return qq, None
+        return str(event.get_sender_id()), None
+
+    # 检查QQ号是否在本群（仅 aiocqhttp 平台可验证；其他平台无法验证时放行）
+    async def _is_in_group(self, event: AstrMessageEvent, group_id: str, user_id: str) -> bool:
+        if event.get_platform_name() != "aiocqhttp":
+            return True
+        try:
+            await event.bot.api.call_action(
+                'get_group_member_info', group_id=int(group_id), user_id=int(user_id)
+            )
+            return True
+        except Exception:
+            return False
 
     # 虚弱（阳痿）检查：处于虚弱期返回拦截消息（含触发用户昵称），否则返回 None（与昏厥检查相互独立）
     def _check_ban(self, user_id: str, user_name: str) -> str:
@@ -387,7 +413,11 @@ class ccb(Star):
         faint_max = self.faint_random_max
         now = time.time()
         f_now = time.time()
-        target_user_id = self._get_target_user_id(event)
+        # 目标解析：优先@，其次消息中的QQ号（需在本群），默认自己
+        target_user_id, err = await self._resolve_target(event, str(event.message_str), group_id)
+        if err:
+            yield event.plain_result(err)
+            return
 
         if self.faint_duration >= 0:
             faint_time = self.faint_duration
@@ -438,13 +468,13 @@ class ccb(Star):
 
         # 禁C名单：名单内用户不能发起与他人的ccb（但可自交，也可/dj）
         if actor_id in self.white_list:
-            yield event.plain_result("你的13被CCB的神封印了，无法发起ccb（悲")
+            yield event.plain_result("神明剥夺了你求偶的权力，你无法发起ccb/百合")
             return
 
         # 禁C名单：名单内用户不能被他人ccb
         if target_user_id in self.white_list:
             nickname = await self._get_nickname(event, target_user_id)
-            yield event.plain_result(f"{nickname} 的洞洞被掌握CCB的神封印了，不能被C力（悲")
+            yield event.plain_result(f"{nickname}受到了神明的庇护，你无法对其发起ccb/百合")
             return
 
 
@@ -665,7 +695,7 @@ class ccb(Star):
             yield event.plain_result("当前群暂无ccb记录。")
             return
 
-        top5 = sorted(group_data, key=lambda x: int(x.get(a2, 0)), reverse=True)[:5]
+        top5 = sorted(group_data, key=lambda x: int(x.get(a2, 0) or 0), reverse=True)[:5]
         msg = "被ccb排行榜 TOP5：\n"
         for i, r in enumerate(top5, 1):
             uid = r[a1]
@@ -891,7 +921,7 @@ class ccb(Star):
             nick = await self._get_nickname(event, uid, strict_event=True)
             # 重新取该用户自己的统计数据（修复：不再引用循环外残留的最后一个记录的值）
             record = next((r for r in group_data if r.get(a1) == uid), None)
-            num = int(record.get(a2, 0)) if record else 0
+            num = int(record.get(a2, 0) or 0) if record else 0
             vol = float(record.get(a3, 0)) if record else 0.0
             actions = actor_actions.get(uid, 0)
             msg += (
@@ -966,7 +996,12 @@ class ccb(Star):
             yield event.plain_result("无权限使用此命令")
             return
 
-        target_user_id = self._get_target_user_id(event)
+        group_id = str(event.get_group_id())
+        # 目标解析：优先@，其次消息中的QQ号（需在本群），默认自己
+        target_user_id, err = await self._resolve_target(event, str(event.message_str), group_id)
+        if err:
+            yield event.plain_result(err)
+            return
         nickname = await self._get_nickname(event, target_user_id)
         if target_user_id in self.white_list:
             self.white_list = [uid for uid in self.white_list if uid != target_user_id]
@@ -1048,8 +1083,9 @@ class ccb(Star):
             head = f"{user_name}, 你坚持了{timep}s哦，{a}.射出了{V:.2f}ml的生命因子,{b}!"
             stat = f"这是ta的第{rec[num_k]}次。ta累计射出了{rec[vol_k]}ml的生命因子。\n"
         else:
-            # 扣B：13水，不使用 back.py 文案
-            head = f"{user_name}, 你喷出了{V:.2f}ml的13水!"
+            # 扣B：13水，不使用 back.py 文案，正文带时长（与 ccb/bh 自交一致）
+            duration = round(random.uniform(0.1, 60), 2)
+            head = f"{user_name} 刚刚扣了{duration}min长的13 ，喷出了{V:.2f}ml的13水"
             stat = f"这是ta的第{rec[num_k]}次。ta累积喷出了{rec[vol_k]}ml的13水。\n"
         chain = [
             Comp.Plain(head),
@@ -1058,11 +1094,9 @@ class ccb(Star):
         ]
         if random.random() < self.dj_faint_prob:
             if self.dj_mode == "d":
-                # 打胶：射空 → 阳痿（贤者模式），末尾显示阳痿时长
+                # 打胶：射空 → 被赋予虚弱buff
                 self.ban_list[send_id] = now + self.ban_duration
-                remain = int(self.ban_duration)
-                m, s = divmod(remain, 60)
-                tail = f"同时{user_name}射空了，进入贤者模式（电子阳痿，剩余 {m}分{s}秒）"
+                tail = f"同时{user_name}射空了，被赋予{int(self.ban_duration // 60)}分钟的虚弱buff"
             else:
                 # 扣B：喷晕 → 昏厥，末尾显示昏厥时长
                 self.faint_list[send_id] = now + faint_time
@@ -1132,7 +1166,11 @@ class ccb(Star):
         send_id = str(event.get_sender_id())
         user_name = event.get_sender_name()
         now = time.time()
-        target_user_id = self._get_target_user_id(event)
+        # 目标解析：优先@，其次消息中的QQ号（需在本群），默认自己
+        target_user_id, err = await self._resolve_target(event, str(event.message_str), group_id)
+        if err:
+            yield event.plain_result(err)
+            return
 
         # 发起者虚弱检查（独立，与 /ccb 相同）
         ban_msg = self._check_ban(send_id, user_name)
@@ -1168,12 +1206,12 @@ class ccb(Star):
 
         # 禁C名单：不能发起百合
         if send_id in self.white_list:
-            yield event.plain_result("你被CCB的神封印了，无法发起百合（悲")
+            yield event.plain_result("神明剥夺了你求偶的权力，你无法发起ccb/百合")
             return
         # 禁C名单：不能被百合
         if target_user_id in self.white_list:
             nickname = await self._get_nickname(event, target_user_id)
-            yield event.plain_result(f"{nickname} 的洞洞被掌握CCB的神封印了，不能被扣（悲")
+            yield event.plain_result(f"{nickname}受到了神明的庇护，你无法对其发起ccb/百合")
             return
 
         duration = round(random.uniform(0.1, 60), 2)
