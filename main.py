@@ -83,7 +83,6 @@ class ccb(Star):
         self.action_times = {}
         self.ban_list = {}
         self.faint_list = {}
-        self.bh_cool_list = {}   # 百合冷却（独立于阳痿，时长复用 yw_ban_duration）
         self.yw_prob = config.get("yw_probability")               # 触发概率
         self.yw_prob_first = config.get("yw_prob_first")          #因为对方为处女而阳痿的概率
         self.faint_prob_first = config.get("faint_prob_first")          #首次晕倒的概率
@@ -136,14 +135,14 @@ class ccb(Star):
             str(event.get_sender_id())
         )
 
-    # 阳痿检查：处于阳痿期返回拦截消息，否则返回 None（与昏厥检查相互独立）
-    def _check_ban(self, user_id: str) -> str:
+    # 虚弱（阳痿）检查：处于虚弱期返回拦截消息（含触发用户昵称），否则返回 None（与昏厥检查相互独立）
+    def _check_ban(self, user_id: str, user_name: str) -> str:
         now = time.time()
         ban_end = self.ban_list.get(user_id, 0)
         if now < ban_end:
             remain = int(ban_end - now)
             m, s = divmod(remain, 60)
-            return f"你已经一滴不剩了，电子阳痿中，剩余 {m}分{s}秒"
+            return f"{user_name}的虚弱还剩余 {m}分{s}秒"
         return None
 
     # 昏厥检查：处于昏厥期返回拦截消息（含触发用户昵称），否则返回 None
@@ -404,7 +403,7 @@ class ccb(Star):
             yw_prob_r = 1.0
 
         # 阳痿检查（独立）
-        ban_msg = self._check_ban(actor_id)
+        ban_msg = self._check_ban(actor_id, user_name)
         if ban_msg:
             yield event.plain_result(ban_msg)
             return
@@ -421,11 +420,11 @@ class ccb(Star):
             times.popleft()
         times.append(now)
 
-        # 超阈值禁用
+        # 超阈值禁用：统一进入虚弱（与 /bh 相同约束）
         if len(times) > self.threshold:
             self.ban_list[actor_id] = now + self.ban_duration
             times.clear()
-            yield event.plain_result("你现在已经射不出任何东西了，进入贤者模式")
+            yield event.plain_result(f"神明阻止了你的行为并给你上了{int(self.ban_duration // 60)}分钟的虚弱")
             return
 
         if target_user_id == actor_id:
@@ -522,13 +521,14 @@ class ccb(Star):
                         # 随机养胃
                         if yw_prob_r < self.yw_prob:
                             self.ban_list[actor_id] = now + self.ban_duration
+                            m, s = divmod(int(self.ban_duration), 60)
 
                             chain = [
                                 Comp.Plain(f"{user_name} 和 {nickname} 发生了{duration}min长的ccb行为，{nickname}被注入了{V:.2f}ml的生命因子"),
                                 Comp.Image.fromURL(pic),
                                 Comp.Plain(f"这是ta的第{item[a2]}次。ta被累积注入了{item[a3]}ml的生命因子。\n"),
                                 Comp.Plain("----------------------------------\n"),
-                                Comp.Plain(f"同时💥{user_name}因为些许的意外炸膛了，进入贤者模式（悲")
+                                Comp.Plain(f"同时💥神明看你不顺眼，给你上了{m}分{s}秒的虚弱buff")
                             ]
                             yield event.chain_result(chain)
 
@@ -593,12 +593,13 @@ class ccb(Star):
                 # 随机养胃
                 if yw_prob_r < self.yw_prob_first:
                     self.ban_list[actor_id] = now + self.ban_duration
+                    m, s = divmod(int(self.ban_duration), 60)
                     chain = [
                     Comp.Plain(f"{user_name} 和 {nickname}发生了{duration}min长的ccb行为，{nickname}被注入了{V:.2f}ml的生命因子"),
                     Comp.Image.fromURL(pic),
                     Comp.Plain("这是ta的初体验~，你把人家的处给破了喵～要负责哦喵～\n"),
                     Comp.Plain("----------------------------------\n"),
-                    Comp.Plain(f"💥同时{user_name}因为体虚被处女征服进入了贤者模式（悲")
+                    Comp.Plain(f"💥同时神明看你不顺眼，给你上了{m}分{s}秒的虚弱buff")
                     ]
                     yield event.chain_result(chain)
 
@@ -989,9 +990,8 @@ class ccb(Star):
         target_user_id = self._get_target_user_id(event)
         self.ban_list.pop(target_user_id, None)
         self.faint_list.pop(target_user_id, None)
-        self.bh_cool_list.pop(target_user_id, None)
         nickname = await self._get_nickname(event, target_user_id)
-        yield event.plain_result(f"已强制结束 {nickname} 的阳痿/昏厥/百合冷却状态，ta又可以愉快的ccb了")
+        yield event.plain_result(f"已强制结束 {nickname} 的虚弱/昏厥状态，ta又可以愉快的ccb了")
 
     @filter.command("dj")
     async def dj(self, event: AstrMessageEvent):
@@ -1006,7 +1006,7 @@ class ccb(Star):
         faint_time = self.faint_duration if self.faint_duration >= 0 else round(random.uniform(self.faint_random_min, self.faint_random_max))
 
         # 阳痿检查（独立）
-        ban_msg = self._check_ban(send_id)
+        ban_msg = self._check_ban(send_id, user_name)
         if ban_msg:
             yield event.plain_result(ban_msg)
             return
@@ -1016,7 +1016,7 @@ class ccb(Star):
             yield event.plain_result(faint_msg)
             return
 
-        # 滑窗限流
+        # 滑窗限流：与 /ccb、/bh 共用同一窗口计数与约束，超限统一进入虚弱
         times = self.action_times.setdefault(send_id, deque())
         while times and now - times[0] > self.window:
             times.popleft()
@@ -1024,7 +1024,7 @@ class ccb(Star):
         if len(times) > self.threshold:
             self.ban_list[send_id] = now + self.ban_duration
             times.clear()
-            yield event.plain_result("你现在已经射不出任何东西了，进入贤者模式")
+            yield event.plain_result(f"神明阻止了你的行为并给你上了{int(self.ban_duration // 60)}分钟的虚弱")
             return
 
         timep = round(random.uniform(1, 666), 2)
@@ -1134,7 +1134,29 @@ class ccb(Star):
         now = time.time()
         target_user_id = self._get_target_user_id(event)
 
-        # 无@自交：与 /ccb 0721 相同的自交逻辑（受 self_ccb 配置控制、跟随 dj_mode、白名单豁免）
+        # 发起者虚弱检查（独立，与 /ccb 相同）
+        ban_msg = self._check_ban(send_id, user_name)
+        if ban_msg:
+            yield event.plain_result(ban_msg)
+            return
+        # 发起者昏厥检查（独立）
+        faint_msg = self._check_faint(send_id, user_name)
+        if faint_msg:
+            yield event.plain_result(faint_msg)
+            return
+
+        # 滑窗限流：与 /ccb、/dj 共用同一窗口计数与约束（自交也计数），超限统一进入虚弱
+        times = self.action_times.setdefault(send_id, deque())
+        while times and now - times[0] > self.window:
+            times.popleft()
+        times.append(now)
+        if len(times) > self.threshold:
+            self.ban_list[send_id] = now + self.ban_duration
+            times.clear()
+            yield event.plain_result(f"神明阻止了你的行为并给你上了{int(self.ban_duration // 60)}分钟的虚弱")
+            return
+
+        # 无@自交：与 /ccb 0721 相同的自交逻辑（受 self_ccb 配置控制、白名单豁免）
         if target_user_id == send_id:
             if not self.selfdo:
                 chain = [Comp.Plain(f"{user_name}，暂时不允许自交哦！")]
@@ -1152,33 +1174,6 @@ class ccb(Star):
         if target_user_id in self.white_list:
             nickname = await self._get_nickname(event, target_user_id)
             yield event.plain_result(f"{nickname} 的洞洞被掌握CCB的神封印了，不能被扣（悲")
-            return
-
-        # 发起者昏厥检查（独立）
-        faint_msg = self._check_faint(send_id, user_name)
-        if faint_msg:
-            yield event.plain_result(faint_msg)
-            return
-
-        # 百合冷却检查（独立冷却，不影响阳痿/昏厥状态）
-        cool_end = self.bh_cool_list.get(send_id, 0)
-        if now < cool_end:
-            remain = int(cool_end - now)
-            m, s = divmod(remain, 60)
-            yield event.plain_result(f"神明阻止了你过激的行为，请等待{m}分{s}秒后再继续")
-            return
-
-        # 滑窗限流：窗口/阈值复用 yw_window/yw_threshold，超限进入冷却（时长复用 yw_ban_duration）
-        times = self.action_times.setdefault(send_id, deque())
-        while times and now - times[0] > self.window:
-            times.popleft()
-        times.append(now)
-        if len(times) > self.threshold:
-            self.bh_cool_list[send_id] = now + self.ban_duration
-            times.clear()
-            remain = int(self.ban_duration)
-            m, s = divmod(remain, 60)
-            yield event.plain_result(f"神明阻止了你过激的行为，请等待{m}分{s}秒后再继续")
             return
 
         duration = round(random.uniform(0.1, 60), 2)
