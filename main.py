@@ -379,7 +379,7 @@ class ccb(Star):
         for i, r in enumerate(top5, 1):
             uid = r[a1]
             nick = await self._get_nickname(event, uid)
-            msg += f"{i}. {nick} - 次数：{r[a2]}\n"
+            msg += f"{i}. {nick} - 被超：{int(r.get(a2, 0) or 0)}次，累计被注入{float(r.get(a3, 0) or 0):.2f}ml\n"
         yield event.plain_result(msg)
 
     @filter.command("ccbvol")
@@ -484,10 +484,7 @@ class ccb(Star):
         msg = (
             f"【{target_nick} 】\n"
             f"• 破壁人：{first_nick}\n"
-            f"• 被超：{total_num}\n"
-            f"• ccb：{cb_total}\n"
-            f"• 被注入：{total_vol:.2f}ml\n"
-            f"• MAX：{max_val:.2f}ml"
+            f"• ccb：被超:{total_num}(发起ccb:{cb_total},被注入:{total_vol:.2f}ml,MAX:{max_val:.2f}ml)"
         )
         if dj_num > 0:
             msg += f"\n• {label}：{dj_vol:.2f}{unit}（{dj_num}次，单次最高{dj_max:.2f}ml）"
@@ -801,7 +798,7 @@ class ccb(Star):
             return
 
         top5 = sorted(entries, key=lambda x: int(x[1].get(num_k, 0)), reverse=True)[:5]
-        msg = f"🦌 {name}排行榜 TOP5 🦌\n"
+        msg = f" {name}排行榜 TOP5 \n"
         for i, (uid, rec) in enumerate(top5, 1):
             nick = await self._get_nickname(event, uid)
             msg += f"{i}. {nick} - {name}：{int(rec.get(num_k, 0))}次，累计{float(rec.get(vol_k, 0) or 0):.2f}ml\n"
