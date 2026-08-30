@@ -12,10 +12,10 @@
     "hint": "同一人多少次请求后会被禁用。"
   },
   "yw_ban_duration": {
-    "description": "阳痿时长（秒）",
+    "description": "阳痿（虚弱）时长（秒）",
     "type": "int",
-    "default": 900,
-    "hint": "被触发限流后禁用多长时间。"
+    "default": 300,
+    "hint": "被触发限流/演出后虚弱的持续时间。默认300秒（5分钟）。"
   },
   "faint_ban_duration": {
     "description": "昏厥时长（秒）",

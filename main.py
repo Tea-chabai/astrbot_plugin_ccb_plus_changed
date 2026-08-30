@@ -479,9 +479,10 @@ class ccb(Star):
         bh_v = float(bh_rec.get(bh_vol, 0) or 0)
         bh_m = float(self.store.get_group_data("dj_b.json", group_id).get(target_user_id, {}).get(a9, 0) or 0)
 
-        # 输出结果
+        # 输出结果（第一行显示昵称而非QQ号）
+        target_nick = await self._get_nickname(event, target_user_id)
         msg = (
-            f"【{record.get(a1)} 】\n"
+            f"【{target_nick} 】\n"
             f"• 破壁人：{first_nick}\n"
             f"• 被超：{total_num}\n"
             f"• ccb：{cb_total}\n"
