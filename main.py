@@ -1,25 +1,22 @@
 # -- coding: utf-8 --
+"""
+CCB PLUS 插件入口：仅负责命令注册与编排。
+逻辑层见 core.py（状态/目标解析/自交演出），数据层见 storage.py（JSON读写/统计/迁移）。
+"""
+import time
+import random
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-import astrbot.api.message_components as Comp
-from collections import deque
 from astrbot.api import AstrBotConfig
+import astrbot.api.message_components as Comp
 
-import time
-import json
-import random
-import os
 from .back import time_long, volume
-DATA_FILE = "data/ccb.json"
-
-LOG_FILE = "data/ccb_log.json"
-
-DJ_DATA_FILE = "data/dj.json"        # 打胶（生命因子）数据，独立文件
-
-DJ_B_DATA_FILE = "data/dj_b.json"    # 扣B（13水）数据，独立文件
-
-BH_DATA_FILE = "data/bh.json"        # 百合（互扣）数据，独立文件
+from .storage import (
+    DataStore,
+    a1, a2, a3, a4, a5, a8, a9, a10, d_num, d_vol, d_max, bh_num, bh_vol,
+)
+from .core import StateKeeper, makeit, get_avatar
 
 HELP_INFO = """
 /ccb ccb，顾名思义，用来ccb 用法： ccb [@或QQ号]，如果不带有@某人则根据配置文件进行自交或者打胶
@@ -42,58 +39,16 @@ HELP_INFO = """
 享受赛博打胶与ccb吧🦌🦌🦌
 """
 
-a1 = "id"       # qq号
-a2 = "num"      # 被C次数
-a3 = "vol"      # 被注入量
-a4 = "ccb_by"   # 被谁C了
-a5 = "max"      # 单次最大注入量
-a8 = "B_vol"    # 13水累计（扣B）
-a9 = "B_max"    # 13水单次最高（扣B）
-a10 = "B_num"   # 扣B次数
-d_num = "d_num" # 打胶次数（生命因子）
-d_vol = "d_vol" # 打胶累计（生命因子）
-d_max = "d_max" # 打胶单次最高（生命因子）
-bh_num = "bh_num" # 被扣次数（百合）
-bh_vol = "bh_vol" # 被扣喷出B水累计（百合）
-
-
-
-
-def get_avatar(user_id: str) -> bytes:
-    return f"https://q4.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
-
-def makeit(group_data, target_user_id):
-    """1 = 已被C过（处女状态已破），2 = 处女/无被C记录（只打过胶不算破处）"""
-    for item in group_data:
-        if item.get(a1) == target_user_id:
-            return 1 if int(item.get(a2, 0) or 0) > 0 else 2
-    return 2
 
 @register("ccb", "Koikokokokoro", "和群友赛博sex的插件PLUS", "1.1.4")
 class ccb(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-        self.window = config.get("yw_window")                 # 滑动窗口长度（秒）
-        self.threshold = config.get("yw_threshold")               # 窗口内最大允许动作次数
-        self.ban_duration = config.get("yw_ban_duration")         # 禁用时长（秒）
-        self.faint_duration = config.get("faint_ban_duration")    #晕倒时长（秒）
-        self.faint_random_min = config.get("faint_random_min")    #晕倒随机最小时长（秒）
-        self.faint_random_max = config.get("faint_random_max")    #晕倒随机最大时长（秒）
-        self.action_times = {}
-        self.ban_list = {}
-        self.faint_list = {}
-        self.yw_prob = config.get("yw_probability")               # 触发概率
-        self.yw_prob_first = config.get("yw_prob_first")          #因为对方为处女而阳痿的概率
-        self.faint_prob_first = config.get("faint_prob_first")          #首次晕倒的概率
-        self.white_list  = config.get("white_list")
-        self.selfdo = self.config.get("self_ccb", False)         # 0721 默认为否
-        self.crit_prob = self.config.get("crit_prob")         #暴击概率
-        self.faint_prob = self.config.get("faint_prob")          #晕倒概率
-        self.dj_faint_prob = self.config.get("dj_faint_prob", 0.15)  #打胶/自扣昏厥概率
-        self.dj_mode = self.config.get("dj_mode", "B")         # 自交模式："B"=扣B(13水)，"d"=打胶(生命因子)
-        self.is_log = self.config.get("is_log", False)           # 完整日志，默认为false
-        self._migrate_legacy_b_data()                          # 旧版 ccb.json 中的B水数据迁移到独立文件
+        self.state = StateKeeper(config)                 # 逻辑层：冷却状态/目标解析/自交演出
+        self.store = DataStore(self.state.dj_mode)       # 数据层：JSON读写/统计
+        # 注意：旧版 data/ 相对路径的数据不会自动迁移，请参照 README 手动复制到 plugin_data 目录
+        self.store.migrate_legacy_b_data()               # 旧版 ccb.json 中的B水字段迁移到 dj_b.json
 
     #  from issue 6
     async def _is_admin(self, event: AstrMessageEvent) -> bool:
@@ -104,7 +59,7 @@ class ccb(Star):
 
     def _save_white_list(self):
         try:
-            self.config["white_list"] = self.white_list
+            self.config["white_list"] = self.state.white_list
             save_fn = getattr(self.config, "save", None)
             if callable(save_fn):
                 save_fn()
@@ -126,7 +81,7 @@ class ccb(Star):
                 pass
         return nickname
 
-    # 获取目标用户ID
+    # 获取目标用户ID（查询/管理命令用：优先@，默认自己，无需群验证）
     def _get_target_user_id(self, event: AstrMessageEvent) -> str:
         self_id = str(event.get_self_id())
         return next(
@@ -135,259 +90,6 @@ class ccb(Star):
             str(event.get_sender_id())
         )
 
-    # 目标解析：优先@，其次命令参数中的QQ号（需验证在本群），默认自己。返回 (target_id, error_msg)
-    async def _resolve_target(self, event: AstrMessageEvent, messages: str, group_id: str) -> tuple:
-        for seg in event.get_messages():
-            if isinstance(seg, Comp.At) and str(seg.qq) != str(event.get_self_id()):
-                return str(seg.qq), None
-        # 仅把5位及以上的纯数字视为QQ号（QQ号最低5位，过滤掉梗数字等短数字）
-        parts = [p for p in str(messages).split() if p.isdigit() and len(p) >= 5]
-        if parts:
-            qq = parts[0]
-            if not await self._is_in_group(event, group_id, qq):
-                return None, f"{event.get_sender_name()}，神明的小本本没有记录id为{qq}的ta呢"
-            return qq, None
-        return str(event.get_sender_id()), None
-
-    # 检查QQ号是否在本群（仅 aiocqhttp 平台可验证；其他平台无法验证时放行）
-    async def _is_in_group(self, event: AstrMessageEvent, group_id: str, user_id: str) -> bool:
-        if event.get_platform_name() != "aiocqhttp":
-            return True
-        try:
-            await event.bot.api.call_action(
-                'get_group_member_info', group_id=int(group_id), user_id=int(user_id)
-            )
-            return True
-        except Exception:
-            return False
-
-    # 虚弱（阳痿）检查：处于虚弱期返回拦截消息（含触发用户昵称），否则返回 None（与昏厥检查相互独立）
-    def _check_ban(self, user_id: str, user_name: str) -> str:
-        now = time.time()
-        ban_end = self.ban_list.get(user_id, 0)
-        if now < ban_end:
-            remain = int(ban_end - now)
-            m, s = divmod(remain, 60)
-            return f"{user_name}的虚弱还剩余 {m}分{s}秒"
-        return None
-
-    # 昏厥检查：处于昏厥期返回拦截消息（含触发用户昵称），否则返回 None
-    def _check_faint(self, user_id: str, user_name: str) -> str:
-        now = time.time()
-        faint_end = self.faint_list.get(user_id, 0)
-        if now < faint_end:
-            remain = int(faint_end - now)
-            m, s = divmod(remain, 60)
-            return f"{user_name} 处于昏厥中剩余 {m}分{s}秒"
-        return None
-
-    # 重新计算由于clear导致的缺口
-    def _recalc_max(self, record: dict):
-        if not isinstance(record, dict):
-            return
-        ccb_by = record.get(a4, {}) or {}
-        total_num = 0
-        try:
-            total_num = int(record.get(a2, 0))
-        except Exception:
-            total_num = 0
-        try:
-            total_vol = float(record.get(a3, 0))
-        except Exception:
-            total_vol = 0.0
-        if total_num <= 0 or not ccb_by:
-            record[a5] = 0.0
-            for k, v in ccb_by.items():
-                if isinstance(v, dict):
-                    v["max"] = False
-            record[a4] = ccb_by
-            return
-        record[a5] = round(total_vol / total_num, 2)
-        try:
-            best_id = max(
-                ccb_by.items(),
-                key=lambda x: int(x[1].get("count", 0)) if isinstance(x[1], dict) else 0
-            )[0]
-        except Exception:
-            best_id = None
-        if best_id:
-            for k, v in ccb_by.items():
-                if isinstance(v, dict):
-                    v["max"] = (k == best_id)
-        record[a4] = ccb_by
-
-    def read_data(self):
-        try:
-            if os.path.exists(DATA_FILE):
-                with open(DATA_FILE, "r") as f:
-                    return json.load(f)
-        except Exception as e:
-            logger.error(f"读取数据错误: {e}")
-        return {}
-
-    def write_data(self, data):
-        try:
-            with open(DATA_FILE, "w") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"写入数据错误: {e}")
-
-    def _read_dj_file(self, path: str) -> dict:
-        """读取独立的自交数据文件（{群ID: {用户ID: {统计}}}, 打胶/扣B）"""
-        try:
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    return data if isinstance(data, dict) else {}
-        except Exception as e:
-            logger.error(f"读取数据错误: {e}")
-        return {}
-
-    def _write_dj_file(self, path: str, data: dict):
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"写入数据错误: {e}")
-
-    # 记录日志
-    def append_log(self, group_id: str, executor_id: str, target_id: str, time: float, vol: float):
-        """
-        记录日志，格式为：
-        {"executor": "...", ````````}
-        """
-        try:
-            # 读取日志，可能用于数据处理
-            if os.path.exists(LOG_FILE):
-                with open(LOG_FILE, 'r', encoding='utf-8') as lf:
-                    try:
-                        logs = json.load(lf)
-                        if not isinstance(logs, list):
-                            logs = []
-                    except Exception:
-                        logs = []
-            else:
-                logs = []
-
-            # 追加日志内容
-            entry = {
-                "group": group_id,
-                "executor": executor_id,
-                "target": target_id,
-                "time": time,
-                "vol": str(round(float(vol), 2))
-            }
-            logs.append(entry)
-
-            # 写回
-            with open(LOG_FILE, 'w', encoding='utf-8') as lf:
-                json.dump(logs, lf, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"append_log 失败: {e}")
-
-    def _record_dj_stats(self, group_id: str, user_id: str, vol: float, mode: str = None) -> tuple:
-        """
-        记录自交数据，写入独立的 json 文件（打胶= dj.json，扣B= dj_b.json）。
-        返回 (记录dict, 键元组(num键, vol键, max键)) 供消息构建使用。
-        """
-        mode = mode or self.dj_mode
-        if mode == "d":
-            file, num_k, vol_k, max_k = DJ_DATA_FILE, d_num, d_vol, d_max
-        else:
-            file, num_k, vol_k, max_k = DJ_B_DATA_FILE, a10, a8, a9
-        data = self._read_dj_file(file)
-        rec = data.setdefault(group_id, {}).setdefault(user_id, {})
-        rec[num_k] = int(rec.get(num_k, 0)) + 1
-        rec[vol_k] = round(float(rec.get(vol_k, 0)) + vol, 2)
-        rec[max_k] = max(float(rec.get(max_k, 0) or 0), vol)
-        self._write_dj_file(file, data)
-        return rec, (num_k, vol_k, max_k)
-
-    def _record_bh_stats(self, group_id: str, user_id: str, vol: float) -> dict:
-        """记录百合（互扣）数据到 bh.json：被扣次数+1、喷水累计。单次最高直接并入扣B的B_max。返回记录dict"""
-        data = self._read_dj_file(BH_DATA_FILE)
-        rec = data.setdefault(group_id, {}).setdefault(user_id, {})
-        rec[bh_num] = int(rec.get(bh_num, 0)) + 1
-        rec[bh_vol] = round(float(rec.get(bh_vol, 0)) + vol, 2)
-        self._write_dj_file(BH_DATA_FILE, data)
-        return rec
-
-    def _merge_b_max(self, group_id: str, user_id: str, vol: float):
-        """百合喷水最大值并入扣B的B_max（dj_b.json），不影响扣B次数与累计"""
-        data = self._read_dj_file(DJ_B_DATA_FILE)
-        rec = data.setdefault(group_id, {}).setdefault(user_id, {})
-        rec[a9] = max(float(rec.get(a9, 0) or 0), vol)
-        self._write_dj_file(DJ_B_DATA_FILE, data)
-
-    def _self_play(self, group_id: str, send_id: str, user_name: str, faint_time: float) -> list:
-        """
-        自扣（0721）：固定为扣B（13水）行为，触发后昏厥（扣晕），不跟随 dj_mode。
-        不改变被C记录与处女状态。用于 ccb / bh 未指定目标且 self_ccb 开启时。返回待发送的消息链。
-        """
-        duration = round(random.uniform(0.1, 60), 2)
-        V = round(random.uniform(0.01, 100), 2)
-        now = time.time()
-
-        rec, _ = self._record_dj_stats(group_id, send_id, V, mode="B")
-
-        if self.is_log:
-            try:
-                self.append_log(group_id, send_id, send_id, duration, V)
-            except Exception as e:
-                logger.warning(f"记录日志失败: {e}")
-
-        head = f"{user_name} 刚刚扣了{duration}min长的13 ，喷出了{V:.2f}ml的13水"
-        stat = f"这是ta的第{rec[a10]}次。ta累积喷出了{rec[a8]}ml的13水。\n"
-        tail = None
-        if random.random() < self.dj_faint_prob:
-            self.faint_list[send_id] = now + faint_time
-            remain = int(faint_time)
-            m, s = divmod(remain, 60)
-            tail = f"同时{user_name}不小心扣晕了,接下来ta什么也干不了（剩余 {m}分{s}秒）"
-
-        chain = [
-            Comp.Plain(head),
-            Comp.Image.fromURL(get_avatar(send_id)),
-            Comp.Plain(stat),
-        ]
-        if tail:
-            chain.append(Comp.Plain("----------------------------------\n"))
-            chain.append(Comp.Plain(tail))
-        return chain
-
-    def _migrate_legacy_b_data(self):
-        """把旧版 ccb.json 记录中的B水字段（B_vol/B_max/B_num）迁移到独立的 dj_b.json"""
-        try:
-            if not os.path.exists(DATA_FILE):
-                return
-            all_data = self.read_data()
-            migrated = False
-            b_data = self._read_dj_file(DJ_B_DATA_FILE)
-            for gid, records in all_data.items():
-                if not isinstance(records, list):
-                    continue
-                for r in records:
-                    if not isinstance(r, dict):
-                        continue
-                    if r.get(a8) is None and r.get(a9) is None and r.get(a10) is None:
-                        continue
-                    uid = r.get(a1)
-                    if not uid:
-                        continue
-                    b = b_data.setdefault(gid, {}).setdefault(uid, {})
-                    b[a10] = int(r.get(a10, 0) or 0)
-                    b[a8] = round(float(r.get(a8, 0) or 0), 2)
-                    b[a9] = max(float(b.get(a9, 0) or 0), float(r.get(a9, 0) or 0))
-                    for key in (a8, a9, a10):
-                        r.pop(key, None)
-                    migrated = True
-            if migrated:
-                self.write_data(all_data)
-                self._write_dj_file(DJ_B_DATA_FILE, b_data)
-                logger.info("已迁移旧版B水数据到 dj_b.json")
-        except Exception as e:
-            logger.warning(f"迁移旧版B水数据失败: {e}")
-
     @filter.command("ccbhelp")
     async def get_help(self, event: AstrMessageEvent):
         """
@@ -395,103 +97,83 @@ class ccb(Star):
         """
         yield event.plain_result(HELP_INFO)
 
-
     @filter.command("ccb")
-
-    
     async def ccb(self, event: AstrMessageEvent):
         """
         ccb，顾名思义，用来ccb
-        用法： ccb [@]
+        用法： ccb [@或QQ号]
         """
-
         group_id = str(event.get_group_id())
         send_id = str(event.get_sender_id())
         user_name = str(event.get_sender_name())
         actor_id = send_id
-        faint_min = self.faint_random_min
-        faint_max = self.faint_random_max
         now = time.time()
         f_now = time.time()
         # 目标解析：优先@，其次消息中的QQ号（需在本群），默认自己
-        target_user_id, err = await self._resolve_target(event, str(event.message_str), group_id)
+        target_user_id, err = await self.state.resolve_target(event, str(event.message_str), group_id)
         if err:
             yield event.plain_result(err)
             return
 
-        if self.faint_duration >= 0:
-            faint_time = self.faint_duration
-        else:
-            faint_time = round(random.uniform(faint_min, faint_max))
+        faint_time = self.state.faint_time()
 
         yw_prob_r1 = random.random()
-        if yw_prob_r1 < self.yw_prob:
+        if yw_prob_r1 < self.state.yw_prob:
             yw_prob_r = yw_prob_r1
             faint_prob_r = 1.0
         else:
             faint_prob_r = random.random()
             yw_prob_r = 1.0
 
-        # 阳痿检查（独立）
-        ban_msg = self._check_ban(actor_id, user_name)
+        # 虚弱检查（独立）
+        ban_msg = self.state.check_ban(actor_id, user_name)
         if ban_msg:
             yield event.plain_result(ban_msg)
             return
         # 昏厥检查（独立）
-        faint_msg = self._check_faint(actor_id, user_name)
+        faint_msg = self.state.check_faint(actor_id, user_name)
         if faint_msg:
             yield event.plain_result(faint_msg)
             return
-        faint_end_target = self.faint_list.get(target_user_id, 0)
+        faint_end_target = self.state.faint_list.get(target_user_id, 0)
 
-        # 窗口时间统计
-        times = self.action_times.setdefault(actor_id, deque())
-        while times and now - times[0] > self.window:
-            times.popleft()
-        times.append(now)
-
-        # 超阈值禁用：统一进入虚弱（与 /bh 相同约束）
-        if len(times) > self.threshold:
-            self.ban_list[actor_id] = now + self.ban_duration
-            times.clear()
-            yield event.plain_result(f"神明阻止了你的行为并给你上了{int(self.ban_duration // 60)}分钟的虚弱")
+        # 滑窗限流（ccb/bh/dj 共用同一窗口计数与约束）
+        rate_msg = self.state.rate_limit(actor_id, now)
+        if rate_msg:
+            yield event.plain_result(rate_msg)
             return
 
+        # 自交（0721）：固定扣B，不改变处女状态。禁C名单用户也可自交
         if target_user_id == actor_id:
-            if not self.selfdo:
+            if not self.state.selfdo:
                 chain = [Comp.Plain(f"{user_name}，暂时不允许自交哦！")]
                 yield event.chain_result(chain)
                 return
-            # 自交（0721）：跟随配置模式，不改变处女状态。禁C名单用户也可自交
-            yield event.chain_result(self._self_play(group_id, send_id, user_name, faint_time))
+            yield event.chain_result(self.state.self_play(self.store, group_id, send_id, user_name, faint_time))
             return
 
         # 禁C名单：名单内用户不能发起与他人的ccb（但可自交，也可/dj）
-        if actor_id in self.white_list:
+        if actor_id in self.state.white_list:
             yield event.plain_result("神明剥夺了你求偶的权力，你无法发起ccb/百合")
             return
 
         # 禁C名单：名单内用户不能被他人ccb
-        if target_user_id in self.white_list:
+        if target_user_id in self.state.white_list:
             nickname = await self._get_nickname(event, target_user_id)
             yield event.plain_result(f"{nickname}受到了神明的庇护，你无法对其发起ccb/百合")
             return
 
-
-
-
         # CCB 逻辑
         duration = round(random.uniform(0.1, 60), 2)
         V = round(random.uniform(0.01, 100), 2)
-        prob = self.crit_prob
         user_name = event.get_sender_name()
-        is_log = self.is_log
-        if random.random() < prob:
+        is_log = self.state.is_log
+        if random.random() < self.state.crit_prob:
             V = round(V * 2, 2)
 
         pic = get_avatar(target_user_id)
 
-        all_data = self.read_data()
+        all_data = self.store.read_ccb()
         group_data = all_data.get(group_id, [])
 
         mode = makeit(group_data, target_user_id)
@@ -514,8 +196,6 @@ class ccb(Star):
                             ccb_by[send_id]["first"] = ccb_by[send_id].get("first", False)
                         else:
                             ccb_by[send_id] = {"count": 1, "first": False, "max": False}
-
-                        # 添加逻辑：记录max值
 
                         # 计算max
                         raw_prev = item.get(a5, None)
@@ -549,9 +229,9 @@ class ccb(Star):
 
                         item[a4] = ccb_by
                         # 随机养胃
-                        if yw_prob_r < self.yw_prob:
-                            self.ban_list[actor_id] = now + self.ban_duration
-                            m, s = divmod(int(self.ban_duration), 60)
+                        if yw_prob_r < self.state.yw_prob:
+                            self.state.ban_list[actor_id] = now + self.state.ban_duration
+                            m, s = divmod(int(self.state.ban_duration), 60)
 
                             chain = [
                                 Comp.Plain(f"{user_name} 和 {nickname} 发生了{duration}min长的ccb行为，{nickname}被注入了{V:.2f}ml的生命因子"),
@@ -576,9 +256,9 @@ class ccb(Star):
                             yield event.chain_result(chain)
 
                         # 随机昏厥
-                        elif faint_prob_r < self.faint_prob:
-                            self.faint_list[target_user_id] = f_now + faint_time
-                            # 注意：faint_end_target 是本命令开头读取的旧值（目标此前未昏厥时为0），
+                        elif faint_prob_r < self.state.faint_prob:
+                            self.state.faint_list[target_user_id] = f_now + faint_time
+                            # 注意：faint_end_target 是命令开头读取的旧值（目标此前未昏厥时为0），
                             # 触发后必须用本次的 faint_time 计算剩余时间，否则会出现负数
                             remain = int(faint_time)
                             m1, s1 = divmod(remain, 60)
@@ -602,13 +282,13 @@ class ccb(Star):
                         # 是否保留完整日志
                         if is_log:
                             try:
-                                self.append_log(group_id, send_id, target_user_id, duration, V)
+                                self.store.append_log(group_id, send_id, target_user_id, duration, V)
                             except Exception as e:
                                 logger.warning(f"记录日志失败: {e}")
 
                         # 写回数据
                         all_data[group_id] = group_data
-                        self.write_data(all_data)
+                        self.store.write_ccb(all_data)
                         return
             except Exception as e:
                 logger.error(f"报错: {e}")
@@ -621,9 +301,9 @@ class ccb(Star):
                 nickname = await self._get_nickname(event, target_user_id, strict_event=True)
 
                 # 随机养胃
-                if yw_prob_r < self.yw_prob_first:
-                    self.ban_list[actor_id] = now + self.ban_duration
-                    m, s = divmod(int(self.ban_duration), 60)
+                if yw_prob_r < self.state.yw_prob_first:
+                    self.state.ban_list[actor_id] = now + self.state.ban_duration
+                    m, s = divmod(int(self.state.ban_duration), 60)
                     chain = [
                     Comp.Plain(f"{user_name} 和 {nickname}发生了{duration}min长的ccb行为，{nickname}被注入了{V:.2f}ml的生命因子"),
                     Comp.Image.fromURL(pic),
@@ -634,8 +314,8 @@ class ccb(Star):
                     yield event.chain_result(chain)
 
                 # 随机昏厥
-                elif faint_prob_r < self.faint_prob_first:
-                    self.faint_list[target_user_id] = f_now + faint_time
+                elif faint_prob_r < self.state.faint_prob_first:
+                    self.state.faint_list[target_user_id] = f_now + faint_time
                     chain = [
                     Comp.Plain(f"{user_name} 和 {nickname}发生了{duration}min长的ccb行为，{nickname}被注入了{V:.2f}ml的生命因子"),
                     Comp.Image.fromURL(pic),
@@ -644,7 +324,6 @@ class ccb(Star):
                     Comp.Plain(f"同时{nickname}被{user_name}C晕了,接下来ta将毫无还手之力")
                     ]
                     yield event.chain_result(chain)
-
 
                 else:
                     chain = [
@@ -670,12 +349,12 @@ class ccb(Star):
                         a5: round(V, 2)
                     })
                 all_data[group_id] = group_data
-                self.write_data(all_data)
+                self.store.write_ccb(all_data)
 
                 # 是否保留完整日志
                 if is_log:
                     try:
-                        self.append_log(group_id, send_id, target_user_id, duration, V)
+                        self.store.append_log(group_id, send_id, target_user_id, duration, V)
                     except Exception as e:
                         logger.warning(f"记录日志失败: {e}")
                 return
@@ -690,7 +369,7 @@ class ccb(Star):
         按次数排行
         """
         group_id = str(event.get_group_id())
-        group_data = self.read_data().get(group_id, [])
+        group_data = self.store.read_ccb().get(group_id, [])
         if not group_data:
             yield event.plain_result("当前群暂无ccb记录。")
             return
@@ -709,7 +388,7 @@ class ccb(Star):
         按注入量排行
         """
         group_id = str(event.get_group_id())
-        group_data = self.read_data().get(group_id, [])
+        group_data = self.store.read_ccb().get(group_id, [])
         if not group_data:
             yield event.plain_result("当前群暂无ccb记录。")
             return
@@ -732,8 +411,7 @@ class ccb(Star):
         target_user_id = self._get_target_user_id(event)
 
         # 读取群数据
-        all_data = self.read_data()
-        group_data = all_data.get(group_id, [])
+        group_data = self.store.read_ccb().get(group_id, [])
 
         # 查找目标记录
         record = next((r for r in group_data if r.get(a1) == target_user_id), None)
@@ -785,21 +463,21 @@ class ccb(Star):
             first_nick = await self._get_nickname(event, first_actor, strict_event=True)
 
         # 自交统计（按配置模式显示：扣B=13水，打胶=生命因子，数据来自独立文件）
-        if self.dj_mode == "d":
-            rec = self._read_dj_file(DJ_DATA_FILE).get(group_id, {}).get(target_user_id, {})
+        if self.state.dj_mode == "d":
+            rec = self.store.get_group_data("dj.json", group_id).get(target_user_id, {})
             num_k, vol_k, max_k, label, unit = d_num, d_vol, d_max, "打胶", "生命因子"
         else:
-            rec = self._read_dj_file(DJ_B_DATA_FILE).get(group_id, {}).get(target_user_id, {})
+            rec = self.store.get_group_data("dj_b.json", group_id).get(target_user_id, {})
             num_k, vol_k, max_k, label, unit = a10, a8, a9, "13水", "ml"
         dj_num = int(rec.get(num_k, 0) or 0)
         dj_vol = float(rec.get(vol_k, 0) or 0)
         dj_max = float(rec.get(max_k, 0) or 0)
 
         # 百合统计（互扣，独立于 dj_mode；单次最高直接复用扣B的B_max）
-        bh_rec = self._read_dj_file(BH_DATA_FILE).get(group_id, {}).get(target_user_id, {})
+        bh_rec = self.store.get_group_data("bh.json", group_id).get(target_user_id, {})
         bh_n = int(bh_rec.get(bh_num, 0) or 0)
         bh_v = float(bh_rec.get(bh_vol, 0) or 0)
-        bh_m = float(self._read_dj_file(DJ_B_DATA_FILE).get(group_id, {}).get(target_user_id, {}).get(a9, 0) or 0)
+        bh_m = float(self.store.get_group_data("dj_b.json", group_id).get(target_user_id, {}).get(a9, 0) or 0)
 
         # 输出结果
         msg = (
@@ -823,7 +501,7 @@ class ccb(Star):
         按max值排行并输出产生者
         """
         group_id = str(event.get_group_id())
-        group_data = self.read_data().get(group_id, [])
+        group_data = self.store.read_ccb().get(group_id, [])
         if not group_data:
             yield event.plain_result("当前群暂无ccb记录。")
             return
@@ -888,8 +566,7 @@ class ccb(Star):
         w_action = 0.5
 
         group_id = str(event.get_group_id())
-        all_data = self.read_data()
-        group_data = all_data.get(group_id, [])
+        group_data = self.store.read_ccb().get(group_id, [])
         if not group_data:
             yield event.plain_result("当前群暂无ccb记录。")
             return
@@ -945,7 +622,7 @@ class ccb(Star):
 
         target_user_id = self._get_target_user_id(event)
 
-        all_data = self.read_data()
+        all_data = self.store.read_ccb()
         group_data = all_data.get(group_id, [])
         if not isinstance(group_data, list):
             group_data = []
@@ -973,10 +650,10 @@ class ccb(Star):
                 modified_records.append(record)
 
         for record in modified_records:
-            self._recalc_max(record)
+            self.store.recalc_max(record)
 
         all_data[group_id] = group_data
-        self.write_data(all_data)
+        self.store.write_ccb(all_data)
 
         msg = (
             f"已清除 {target_user_id} 的 CCB 记录：\n"
@@ -990,7 +667,7 @@ class ccb(Star):
     async def ccbnodo(self, event: AstrMessageEvent):
         """
         管理员指令：切换目标防被 CCB 状态
-        用法：ccbnodo [@目标]
+        用法：ccbnodo [@目标或QQ号]
         """
         if not await self._is_admin(event):
             yield event.plain_result("无权限使用此命令")
@@ -998,24 +675,24 @@ class ccb(Star):
 
         group_id = str(event.get_group_id())
         # 目标解析：优先@，其次消息中的QQ号（需在本群），默认自己
-        target_user_id, err = await self._resolve_target(event, str(event.message_str), group_id)
+        target_user_id, err = await self.state.resolve_target(event, str(event.message_str), group_id)
         if err:
             yield event.plain_result(err)
             return
         nickname = await self._get_nickname(event, target_user_id)
-        if target_user_id in self.white_list:
-            self.white_list = [uid for uid in self.white_list if uid != target_user_id]
+        if target_user_id in self.state.white_list:
+            self.state.white_list = [uid for uid in self.state.white_list if uid != target_user_id]
             self._save_white_list()
             yield event.plain_result(f"已解除 {nickname} 的禁C状态：ta可以正常被C和C别人了")
         else:
-            self.white_list.append(target_user_id)
+            self.state.white_list.append(target_user_id)
             self._save_white_list()
             yield event.plain_result(f"已将 {nickname} 加入禁C名单：ta不能主动C别人，也不能被C（仍可自交 /dj 和 /ccb 0721）")
 
     @filter.command("timeclean")
     async def timeclean(self, event: AstrMessageEvent):
         """
-        管理员指令：强制结束指定用户的阳痿/昏厥冷却
+        管理员指令：强制结束指定用户的虚弱/昏厥冷却
         用法：timeclean [@目标]，不带@则默认清除自己
         """
         if not await self._is_admin(event):
@@ -1023,8 +700,8 @@ class ccb(Star):
             return
 
         target_user_id = self._get_target_user_id(event)
-        self.ban_list.pop(target_user_id, None)
-        self.faint_list.pop(target_user_id, None)
+        self.state.ban_list.pop(target_user_id, None)
+        self.state.faint_list.pop(target_user_id, None)
         nickname = await self._get_nickname(event, target_user_id)
         yield event.plain_result(f"已强制结束 {nickname} 的虚弱/昏厥状态，ta又可以愉快的ccb了")
 
@@ -1038,45 +715,40 @@ class ccb(Star):
         send_id = str(event.get_sender_id())
         user_name = event.get_sender_name()
         now = time.time()
-        faint_time = self.faint_duration if self.faint_duration >= 0 else round(random.uniform(self.faint_random_min, self.faint_random_max))
+        faint_time = self.state.faint_time()
 
-        # 阳痿检查（独立）
-        ban_msg = self._check_ban(send_id, user_name)
+        # 虚弱检查（独立）
+        ban_msg = self.state.check_ban(send_id, user_name)
         if ban_msg:
             yield event.plain_result(ban_msg)
             return
         # 昏厥检查（独立）
-        faint_msg = self._check_faint(send_id, user_name)
+        faint_msg = self.state.check_faint(send_id, user_name)
         if faint_msg:
             yield event.plain_result(faint_msg)
             return
 
-        # 滑窗限流：与 /ccb、/bh 共用同一窗口计数与约束，超限统一进入虚弱
-        times = self.action_times.setdefault(send_id, deque())
-        while times and now - times[0] > self.window:
-            times.popleft()
-        times.append(now)
-        if len(times) > self.threshold:
-            self.ban_list[send_id] = now + self.ban_duration
-            times.clear()
-            yield event.plain_result(f"神明阻止了你的行为并给你上了{int(self.ban_duration // 60)}分钟的虚弱")
+        # 滑窗限流（ccb/bh/dj 共用同一窗口计数与约束）
+        rate_msg = self.state.rate_limit(send_id, now)
+        if rate_msg:
+            yield event.plain_result(rate_msg)
             return
 
         timep = round(random.uniform(1, 666), 2)
         V = round(random.uniform(0.01, 100), 2)
 
         # 按配置模式记录自交数据到独立文件（不改变被C记录，不改变处女状态）
-        rec, (num_k, vol_k, _) = self._record_dj_stats(group_id, send_id, V)
+        rec, (num_k, vol_k, _) = self.store.record_dj_stats(group_id, send_id, V)
 
         # 是否保留完整日志
-        if self.is_log:
+        if self.state.is_log:
             try:
-                self.append_log(group_id, send_id, send_id, timep, V)
+                self.store.append_log(group_id, send_id, send_id, timep, V)
             except Exception as e:
                 logger.warning(f"记录日志失败: {e}")
 
         # 随机昏厥（概率可配置）
-        if self.dj_mode == "d":
+        if self.state.dj_mode == "d":
             # 打胶：打出生命因子，back.py 文案特供
             a = time_long(timep)
             b = volume(V)
@@ -1092,14 +764,14 @@ class ccb(Star):
             Comp.Image.fromURL(get_avatar(send_id)),
             Comp.Plain(stat),
         ]
-        if random.random() < self.dj_faint_prob:
-            if self.dj_mode == "d":
+        if random.random() < self.state.dj_faint_prob:
+            if self.state.dj_mode == "d":
                 # 打胶：射空 → 被赋予虚弱buff
-                self.ban_list[send_id] = now + self.ban_duration
-                tail = f"同时{user_name}射空了，被赋予{int(self.ban_duration // 60)}分钟的虚弱buff"
+                self.state.ban_list[send_id] = now + self.state.ban_duration
+                tail = f"同时{user_name}射空了，被赋予{int(self.state.ban_duration // 60)}分钟的虚弱buff"
             else:
                 # 扣B：喷晕 → 昏厥，末尾显示昏厥时长
-                self.faint_list[send_id] = now + faint_time
+                self.state.faint_list[send_id] = now + faint_time
                 remain = int(faint_time)
                 m, s = divmod(remain, 60)
                 tail = f"同时{user_name} 不小心扣晕了,接下来ta什么也做不了（剩余 {m}分{s}秒）"
@@ -1107,20 +779,15 @@ class ccb(Star):
             chain.append(Comp.Plain(tail))
         yield event.chain_result(chain)
 
-    def _get_self_stats(self, group_id: str) -> dict:
-        """按配置模式读取当前群的自交统计数据（{用户ID: 记录dict}）"""
-        file = DJ_DATA_FILE if self.dj_mode == "d" else DJ_B_DATA_FILE
-        return self._read_dj_file(file).get(group_id, {})
-
     @filter.command("djtop")
     async def djtop(self, event: AstrMessageEvent):
         """
         自交排行榜：按自交次数排行（数据与文案按配置模式：扣B=13水，打胶=生命因子）
         """
         group_id = str(event.get_group_id())
-        group = self._get_self_stats(group_id)
-        num_k, vol_k = (d_num, d_vol) if self.dj_mode == "d" else (a10, a8)
-        name = "打胶" if self.dj_mode == "d" else "扣B"
+        group = self.store.get_self_stats(group_id)
+        num_k, vol_k = (d_num, d_vol) if self.state.dj_mode == "d" else (a10, a8)
+        name = "打胶" if self.state.dj_mode == "d" else "扣B"
 
         entries = [(uid, rec) for uid, rec in group.items() if int(rec.get(num_k, 0) or 0) > 0]
         if not entries:
@@ -1140,9 +807,9 @@ class ccb(Star):
         自交排行榜：按单次最高排行（数据与文案按配置模式：扣B=13水，打胶=生命因子）
         """
         group_id = str(event.get_group_id())
-        group = self._get_self_stats(group_id)
-        max_k = d_max if self.dj_mode == "d" else a9
-        unit = "生命因子" if self.dj_mode == "d" else "13水"
+        group = self.store.get_self_stats(group_id)
+        max_k = d_max if self.state.dj_mode == "d" else a9
+        unit = "生命因子" if self.state.dj_mode == "d" else "13水"
 
         entries = [(uid, rec) for uid, rec in group.items() if float(rec.get(max_k, 0) or 0) > 0]
         if not entries:
@@ -1160,84 +827,79 @@ class ccb(Star):
     async def bh(self, event: AstrMessageEvent):
         """
         百合：和群友互扣，被扣的人喷出B水并记录到独立数据
-        用法：bh [@目标]
+        用法：bh [@目标或QQ号]
         """
         group_id = str(event.get_group_id())
         send_id = str(event.get_sender_id())
         user_name = event.get_sender_name()
         now = time.time()
         # 目标解析：优先@，其次消息中的QQ号（需在本群），默认自己
-        target_user_id, err = await self._resolve_target(event, str(event.message_str), group_id)
+        target_user_id, err = await self.state.resolve_target(event, str(event.message_str), group_id)
         if err:
             yield event.plain_result(err)
             return
 
         # 发起者虚弱检查（独立，与 /ccb 相同）
-        ban_msg = self._check_ban(send_id, user_name)
+        ban_msg = self.state.check_ban(send_id, user_name)
         if ban_msg:
             yield event.plain_result(ban_msg)
             return
         # 发起者昏厥检查（独立）
-        faint_msg = self._check_faint(send_id, user_name)
+        faint_msg = self.state.check_faint(send_id, user_name)
         if faint_msg:
             yield event.plain_result(faint_msg)
             return
 
-        # 滑窗限流：与 /ccb、/dj 共用同一窗口计数与约束（自交也计数），超限统一进入虚弱
-        times = self.action_times.setdefault(send_id, deque())
-        while times and now - times[0] > self.window:
-            times.popleft()
-        times.append(now)
-        if len(times) > self.threshold:
-            self.ban_list[send_id] = now + self.ban_duration
-            times.clear()
-            yield event.plain_result(f"神明阻止了你的行为并给你上了{int(self.ban_duration // 60)}分钟的虚弱")
+        # 滑窗限流（ccb/bh/dj 共用同一窗口计数与约束，自交也计数）
+        rate_msg = self.state.rate_limit(send_id, now)
+        if rate_msg:
+            yield event.plain_result(rate_msg)
             return
 
         # 无@自交：与 /ccb 0721 相同的自交逻辑（受 self_ccb 配置控制、白名单豁免）
         if target_user_id == send_id:
-            if not self.selfdo:
+            if not self.state.selfdo:
                 chain = [Comp.Plain(f"{user_name}，暂时不允许自交哦！")]
                 yield event.chain_result(chain)
                 return
-            faint_time = self.faint_duration if self.faint_duration >= 0 else round(random.uniform(self.faint_random_min, self.faint_random_max))
-            yield event.chain_result(self._self_play(group_id, send_id, user_name, faint_time))
+            faint_time = self.state.faint_time()
+            yield event.chain_result(self.state.self_play(self.store, group_id, send_id, user_name, faint_time))
             return
 
         # 禁C名单：不能发起百合
-        if send_id in self.white_list:
+        if send_id in self.state.white_list:
             yield event.plain_result("神明剥夺了你求偶的权力，你无法发起ccb/百合")
             return
         # 禁C名单：不能被百合
-        if target_user_id in self.white_list:
+        if target_user_id in self.state.white_list:
             nickname = await self._get_nickname(event, target_user_id)
             yield event.plain_result(f"{nickname}受到了神明的庇护，你无法对其发起ccb/百合")
             return
 
         duration = round(random.uniform(0.1, 60), 2)
         V_B = round(random.uniform(0.01, 100), 2)
-        if random.random() < self.crit_prob:
+        if random.random() < self.state.crit_prob:
             V_B = round(V_B * 2, 2)
 
         # 被扣者状态：当前是否已昏厥、昏厥时长（与全插件同一套可配置时长）
-        faint_end_target = self.faint_list.get(target_user_id, 0)
+        faint_end_target = self.state.faint_list.get(target_user_id, 0)
         is_target_fainting = now <= faint_end_target
-        faint_time = self.faint_duration if self.faint_duration >= 0 else round(random.uniform(self.faint_random_min, self.faint_random_max))
+        faint_time = self.state.faint_time()
 
         # 记录被扣者的百合数据，并将最大值并入扣B的B_max
-        rec = self._record_bh_stats(group_id, target_user_id, V_B)
-        self._merge_b_max(group_id, target_user_id, V_B)
+        rec = self.store.record_bh_stats(group_id, target_user_id, V_B)
+        self.store.merge_b_max(group_id, target_user_id, V_B)
         nickname = await self._get_nickname(event, target_user_id)
 
         # 是否保留完整日志
-        if self.is_log:
+        if self.state.is_log:
             try:
-                self.append_log(group_id, send_id, target_user_id, duration, V_B)
+                self.store.append_log(group_id, send_id, target_user_id, duration, V_B)
             except Exception as e:
                 logger.warning(f"记录日志失败: {e}")
 
         chain = [
-            Comp.Plain(f"{user_name} 和 {nickname} 发生了百合互扣，{nickname}被扣出了{V_B:.2f}ml的13水"),
+            Comp.Plain(f"{user_name} 和 {nickname} 发生了{duration}min长的百合互扣，{nickname}被扣出了{V_B:.2f}ml的13水"),
             Comp.Image.fromURL(get_avatar(target_user_id)),
             Comp.Plain(f"这是ta的第{rec[bh_num]}次被扣。ta被扣出了累计{rec[bh_vol]}ml的13水。\n"),
         ]
@@ -1246,8 +908,8 @@ class ccb(Star):
             remain = int(faint_end_target - now)
             m, s = divmod(remain, 60)
             tail = f"同时{nickname}现在正处于昏厥中,ta现在什么也干不了,剩余 {m}分{s}秒"
-        elif random.random() < self.faint_prob:
-            self.faint_list[target_user_id] = now + faint_time
+        elif random.random() < self.state.faint_prob:
+            self.state.faint_list[target_user_id] = now + faint_time
             remain = int(faint_time)
             m, s = divmod(remain, 60)
             tail = f"同时{nickname}被{user_name}扣晕了,接下来ta将毫无还手之力,剩余 {m}分{s}秒"
@@ -1264,7 +926,7 @@ class ccb(Star):
         百合排行榜：按被扣次数排行
         """
         group_id = str(event.get_group_id())
-        group = self._read_dj_file(BH_DATA_FILE).get(group_id, {})
+        group = self.store.get_group_data("bh.json", group_id)
 
         entries = [(uid, rec) for uid, rec in group.items() if int(rec.get(bh_num, 0) or 0) > 0]
         if not entries:
@@ -1272,7 +934,7 @@ class ccb(Star):
             return
 
         top5 = sorted(entries, key=lambda x: int(x[1].get(bh_num, 0)), reverse=True)[:5]
-        b_data = self._read_dj_file(DJ_B_DATA_FILE).get(group_id, {})
+        b_data = self.store.get_group_data("dj_b.json", group_id)
         msg = "🌺 百合互扣排行榜 TOP5 🌺\n"
         for i, (uid, rec) in enumerate(top5, 1):
             nick = await self._get_nickname(event, uid)
