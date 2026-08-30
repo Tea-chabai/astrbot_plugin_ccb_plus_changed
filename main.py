@@ -32,7 +32,7 @@ HELP_INFO = """
 /bhtop 百合榜：按被扣次数排行
 /ccbclear   管理员指令：清除某人的所有 CCB 记录，用法：ccbclear [@目标]
 /ccbnodo  管理员指令：切换目标禁C状态，用法：ccbnodo [@目标或QQ号]（禁C者不能主动C别人、也不能被C，但仍可自交）
-/timeclean   管理员指令：强制结束指定用户的虚弱/昏厥冷却，用法：timeclean [@目标]（不带@默认清除自己）
+/timeclear   管理员指令：强制结束指定用户的虚弱/昏厥冷却，用法：timeclear [@目标或QQ号]（不带目标默认清除自己）
 
 根据配置文件可调控炸膛的概率
 
@@ -690,17 +690,22 @@ class ccb(Star):
             self._save_white_list()
             yield event.plain_result(f"已将 {nickname} 加入禁C名单：ta不能主动C别人，也不能被C（仍可自交 /dj 和 /ccb 0721）")
 
-    @filter.command("timeclean")
-    async def timeclean(self, event: AstrMessageEvent):
+    @filter.command("timeclear")
+    async def timeclear(self, event: AstrMessageEvent):
         """
         管理员指令：强制结束指定用户的虚弱/昏厥冷却
-        用法：timeclean [@目标]，不带@则默认清除自己
+        用法：timeclear [@目标或QQ号]，不带目标则默认清除自己
         """
         if not await self._is_admin(event):
             yield event.plain_result("无权限使用此命令")
             return
 
-        target_user_id = self._get_target_user_id(event)
+        group_id = str(event.get_group_id())
+        # 目标解析：优先@，其次消息中的QQ号（需在本群），默认自己
+        target_user_id, err = await self.state.resolve_target(event, str(event.message_str), group_id)
+        if err:
+            yield event.plain_result(err)
+            return
         self.state.ban_list.pop(target_user_id, None)
         self.state.faint_list.pop(target_user_id, None)
         nickname = await self._get_nickname(event, target_user_id)
