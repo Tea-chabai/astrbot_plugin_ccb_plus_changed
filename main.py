@@ -66,19 +66,34 @@ class ccb(Star):
         except Exception as e:
             logger.warning(f"保存白名单失败: {e}")
 
-    async def _get_nickname(self, event: AstrMessageEvent, user_id: str, strict_event: bool = False) -> str:
+    async def _get_nickname(self, event: AstrMessageEvent, user_id: str) -> str:
+        """
+        获取用户昵称：不再硬编码平台（napcat 的 aiocqhttp 只是其中一种）。
+        只要 event 暴露 bot.api.call_action 就尝试：
+        OneBot v11 用 get_stranger_info（返回 nick），OneBot v12 用 get_user_info（返回 user_name）。
+        全部失败或平台不支持时回退为 QQ号。
+        """
         nickname = user_id
-        if event.get_platform_name() == "aiocqhttp":
-            try:
-                from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
-                if strict_event:
-                    assert isinstance(event, AiocqhttpMessageEvent)
-                stranger_info = await event.bot.api.call_action(
-                    'get_stranger_info', user_id=user_id
-                )
-                nickname = stranger_info.get("nick", nickname)
-            except Exception:
-                pass
+        try:
+            bot = getattr(event, "bot", None)
+            api = getattr(bot, "api", None) if bot is not None else None
+            if api is None or not hasattr(api, "call_action"):
+                return nickname
+            for action in ("get_stranger_info", "get_user_info"):
+                try:
+                    info = await api.call_action(action, user_id=user_id) or {}
+                    # 字段兼容：nick=NapCat等兼容层字段，nickname=OneBot v11 标准字段（SnowLuma等），
+                    # user_name/user_displayname=OneBot v12 字段
+                    nick = (info.get("nick")
+                            or info.get("nickname")
+                            or info.get("user_name")
+                            or info.get("user_displayname"))
+                    if nick:
+                        return str(nick)
+                except Exception:
+                    continue
+        except Exception:
+            pass
         return nickname
 
     # 获取目标用户ID（查询/管理命令用：优先@，默认自己，无需群验证）
@@ -183,7 +198,7 @@ class ccb(Star):
                 for item in group_data:
                     if item.get(a1) == target_user_id:
                         # 获取昵称
-                        nickname = await self._get_nickname(event, target_user_id, strict_event=True)
+                        nickname = await self._get_nickname(event, target_user_id)
 
                         # 更新 num / vol / ccb_by
                         item[a2] = int(item.get(a2, 0)) + 1
@@ -298,7 +313,7 @@ class ccb(Star):
         else:
             # 新记录
             try:
-                nickname = await self._get_nickname(event, target_user_id, strict_event=True)
+                nickname = await self._get_nickname(event, target_user_id)
 
                 # 随机养胃
                 if yw_prob_r < self.state.yw_prob_first:
@@ -460,7 +475,7 @@ class ccb(Star):
         # 获取昵称
         first_nick = first_actor or "未知"
         if first_actor:
-            first_nick = await self._get_nickname(event, first_actor, strict_event=True)
+            first_nick = await self._get_nickname(event, first_actor)
 
         # 自交统计（按配置模式显示：扣B=13水，打胶=生命因子，数据来自独立文件）
         if self.state.dj_mode == "d":
@@ -543,10 +558,10 @@ class ccb(Star):
                     producer_id = None
 
             # 获取昵称
-            nick = await self._get_nickname(event, uid, strict_event=True)
+            nick = await self._get_nickname(event, uid)
             producer_nick = producer_id or "未知"
             if producer_id:
-                producer_nick = await self._get_nickname(event, producer_id, strict_event=True)
+                producer_nick = await self._get_nickname(event, producer_id)
 
             msg += f"{i}. {nick} - MAX注入：{max_val:.2f}ml（{producer_nick}）\n"
 
@@ -593,7 +608,7 @@ class ccb(Star):
         # 构造输出
         msg = "💎 小南梁 TOP5 💎\n"
         for idx, (uid, xnn_val) in enumerate(ranking[:5], 1):
-            nick = await self._get_nickname(event, uid, strict_event=True)
+            nick = await self._get_nickname(event, uid)
             # 重新取该用户自己的统计数据（修复：不再引用循环外残留的最后一个记录的值）
             record = next((r for r in group_data if r.get(a1) == uid), None)
             num = int(record.get(a2, 0) or 0) if record else 0
