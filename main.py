@@ -179,7 +179,7 @@ class ccb(Star):
         # 禁C名单：名单内用户不能被他人ccb
         if target_user_id in self.state.white_list:
             nickname = await self._get_nickname(event, target_user_id)
-            yield event.plain_result(f"{nickname}受到了神明的庇护，你无法对其发起ccb/百合")
+            yield event.plain_result(f"{nickname}对方拒绝了和你ccb/百合")
             return
 
         # CCB 逻辑
@@ -256,8 +256,8 @@ class ccb(Star):
                                 Comp.Plain(f"{user_name} 和 {nickname} 发生了{duration}min长的ccb行为，{nickname}被注入了{V:.2f}ml的生命因子"),
                                 Comp.Image.fromURL(pic),
                                 Comp.Plain(f"这是ta的第{item[a2]}次。ta被累积注入了{item[a3]}ml的生命因子。\n"),
-                                Comp.Plain("----------------------------------\n"),
-                                Comp.Plain(f"同时💥神明看你不顺眼，降下{m}分{s}秒的神罚")
+                                Comp.Plain("-----------------------------\n"),
+                                Comp.Plain(f"同时神明看你不顺眼，降下{m}分{s}秒的神罚")
                             ]
                             yield event.chain_result(chain)
 
@@ -328,7 +328,7 @@ class ccb(Star):
                     Comp.Image.fromURL(pic),
                     Comp.Plain("这是ta的初体验~，你把人家的处给破了喵～要负责哦喵～\n"),
                     Comp.Plain("----------------------------------\n"),
-                    Comp.Plain(f"💥同时神明看你不顺眼，降下{m}分{s}秒的神罚")
+                    Comp.Plain(f"同时神明看你不顺眼，降下{m}分{s}秒的神罚")
                     ]
                     yield event.chain_result(chain)
 
@@ -700,11 +700,11 @@ class ccb(Star):
         if target_user_id in self.state.white_list:
             self.state.white_list = [uid for uid in self.state.white_list if uid != target_user_id]
             self._save_white_list()
-            yield event.plain_result(f"已解除 {nickname} 的禁C状态：ta可以正常被C和C别人了")
+            yield event.plain_result(f"已解除 {nickname} 的保护状态：ta可以正常被C和C别人了")
         else:
             self.state.white_list.append(target_user_id)
             self._save_white_list()
-            yield event.plain_result(f"已将 {nickname} 加入禁C名单：ta不能主动C别人，也不能被C（仍可自交 /dj 和 /ccb 0721）")
+            yield event.plain_result(f"已将 {nickname} 加入保护名单：ta无法被C和C别人了")
 
     @filter.command("timeclear")
     async def timeclear(self, event: AstrMessageEvent):
@@ -894,7 +894,7 @@ class ccb(Star):
         # 禁C名单：不能被百合
         if target_user_id in self.state.white_list:
             nickname = await self._get_nickname(event, target_user_id)
-            yield event.plain_result(f"{nickname}受到了神明的庇护，你无法对其发起ccb/百合")
+            yield event.plain_result(f"{nickname}对方拒绝了和你ccb/百合")
             return
 
         duration = round(random.uniform(0.1, 60), 2)
