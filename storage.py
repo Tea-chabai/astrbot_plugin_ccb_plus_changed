@@ -22,8 +22,11 @@ d_vol = "d_vol"    # 打胶累计（生命因子）
 d_max = "d_max"    # 打胶单次最高（生命因子）
 bh_num = "bh_num"  # 被扣次数（百合）
 bh_vol = "bh_vol"  # 被扣喷出B水累计（百合）
-
-DATA_FILES = ("ccb.json", "ccb_log.json", "dj.json", "dj_b.json", "bh.json")
+hn_num = "hn_num"    # 喂养次数（喝奈/泌乳）
+hn_vol = "hn_vol"    # 泌乳累计（喝奈）
+hn_max = "hn_max"    # 单次最大泌乳量
+hn_by = "hn_by"      # 被谁喝了：{喝者ID: 次数}
+hn_first = "hn_first"  # 初乳喝者ID（第一个喝的人）
 
 
 def get_data_dir() -> str:
@@ -147,6 +150,25 @@ class DataStore:
         rec = data.setdefault(group_id, {}).setdefault(user_id, {})
         rec[a9] = max(float(rec.get(a9, 0) or 0), vol)
         write_json(data_file("dj_b.json"), data)
+
+    def record_hn_stats(self, group_id: str, user_id: str, vol: float, drinker: str) -> tuple:
+        """
+        记录喝奈（泌乳）数据到 hn.json：喂养次数+1、泌乳累计、单次最大、被谁喝、初乳喝者。
+        drinker 为本次喝奶的人（目标自己喝时=user_id）。返回 (记录dict, 是否首次)
+        """
+        data = read_json(data_file("hn.json"))
+        rec = data.setdefault(group_id, {}).setdefault(user_id, {})
+        is_first = int(rec.get(hn_num, 0) or 0) == 0
+        rec[hn_num] = int(rec.get(hn_num, 0)) + 1
+        rec[hn_vol] = round(float(rec.get(hn_vol, 0)) + vol, 2)
+        rec[hn_max] = max(float(rec.get(hn_max, 0) or 0), vol)
+        if is_first:
+            rec[hn_first] = drinker
+        by = rec.setdefault(hn_by, {})
+        by[drinker] = int(by.get(drinker, 0)) + 1
+        rec[hn_by] = by
+        write_json(data_file("hn.json"), data)
+        return rec, is_first
 
     # ---- 数据维护 ----
     def recalc_max(self, record: dict):

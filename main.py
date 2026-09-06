@@ -15,6 +15,7 @@ from .back import time_long, volume
 from .storage import (
     DataStore,
     a1, a2, a3, a4, a5, a8, a9, a10, d_num, d_vol, d_max, bh_num, bh_vol,
+    hn_num, hn_vol, hn_max, hn_first,
 )
 from .core import StateKeeper, makeit, get_avatar
 
@@ -30,9 +31,12 @@ HELP_INFO = """
 /djmax 自交榜：按单次最高排行（数据按配置模式）
 /bh 百合：和群友互扣，被扣的人喷出B水并记录，用法：bh [@目标或QQ号]
 /bhtop 百合榜：按被扣次数排行
+/hn 喝奈：从目标汲取奶喝，无@时自取其乳，用法：hn [@或QQ号]（受禁C名单控制）
+/hninfo  查询泌乳信息：初乳被谁喝了、单次最大泌乳、累计泌乳，用法：hninfo [@目标]
+/hntop 泌乳榜：按喂养次数排行
 /ccbclear   管理员指令：清除某人的所有 CCB 记录，用法：ccbclear [@目标]
 /ccbnodo  管理员指令：切换目标禁C状态，用法：ccbnodo [@目标或QQ号]（禁C者不能主动C别人、也不能被C，但仍可自交）
-/timeclear   管理员指令：强制结束指定用户的虚弱/昏厥冷却，用法：timeclear [@目标或QQ号]（不带目标默认清除自己）
+/timeclear   管理员指令：强制结束指定用户的神罚/昏厥冷却，用法：timeclear [@目标或QQ号]（不带目标默认清除自己）
 
 根据配置文件可调控炸膛的概率
 
@@ -140,7 +144,7 @@ class ccb(Star):
             faint_prob_r = random.random()
             yw_prob_r = 1.0
 
-        # 虚弱检查（独立）
+        # 神罚检查（独立）
         ban_msg = self.state.check_ban(actor_id, user_name)
         if ban_msg:
             yield event.plain_result(ban_msg)
@@ -253,7 +257,7 @@ class ccb(Star):
                                 Comp.Image.fromURL(pic),
                                 Comp.Plain(f"这是ta的第{item[a2]}次。ta被累积注入了{item[a3]}ml的生命因子。\n"),
                                 Comp.Plain("----------------------------------\n"),
-                                Comp.Plain(f"同时💥神明看你不顺眼，给你上了{m}分{s}秒的虚弱buff")
+                                Comp.Plain(f"同时💥神明看你不顺眼，降下{m}分{s}秒的神罚")
                             ]
                             yield event.chain_result(chain)
 
@@ -324,7 +328,7 @@ class ccb(Star):
                     Comp.Image.fromURL(pic),
                     Comp.Plain("这是ta的初体验~，你把人家的处给破了喵～要负责哦喵～\n"),
                     Comp.Plain("----------------------------------\n"),
-                    Comp.Plain(f"💥同时神明看你不顺眼，给你上了{m}分{s}秒的虚弱buff")
+                    Comp.Plain(f"💥同时神明看你不顺眼，降下{m}分{s}秒的神罚")
                     ]
                     yield event.chain_result(chain)
 
@@ -705,7 +709,7 @@ class ccb(Star):
     @filter.command("timeclear")
     async def timeclear(self, event: AstrMessageEvent):
         """
-        管理员指令：强制结束指定用户的虚弱/昏厥冷却
+        管理员指令：强制结束指定用户的神罚/昏厥冷却
         用法：timeclear [@目标或QQ号]，不带目标则默认清除自己
         """
         if not await self._is_admin(event):
@@ -721,7 +725,7 @@ class ccb(Star):
         self.state.ban_list.pop(target_user_id, None)
         self.state.faint_list.pop(target_user_id, None)
         nickname = await self._get_nickname(event, target_user_id)
-        yield event.plain_result(f"已强制结束 {nickname} 的虚弱/昏厥状态，ta又可以愉快的ccb了")
+        yield event.plain_result(f"已强制结束 {nickname} 的神罚/昏厥状态，ta又可以愉快的ccb了")
 
     @filter.command("dj")
     async def dj(self, event: AstrMessageEvent):
@@ -735,7 +739,7 @@ class ccb(Star):
         now = time.time()
         faint_time = self.state.faint_time()
 
-        # 虚弱检查（独立）
+        # 神罚检查（独立）
         ban_msg = self.state.check_ban(send_id, user_name)
         if ban_msg:
             yield event.plain_result(ban_msg)
@@ -784,9 +788,9 @@ class ccb(Star):
         ]
         if random.random() < self.state.dj_faint_prob:
             if self.state.dj_mode == "d":
-                # 打胶：射空 → 被赋予虚弱buff
+                # 打胶：射空 → 被降下神罚
                 self.state.ban_list[send_id] = now + self.state.ban_duration
-                tail = f"同时{user_name}射空了，被赋予{int(self.state.ban_duration // 60)}分钟的虚弱buff"
+                tail = f"同时{user_name}射空了，被降下{int(self.state.ban_duration // 60)}分钟的神罚"
             else:
                 # 扣B：喷晕 → 昏厥，末尾显示昏厥时长
                 self.state.faint_list[send_id] = now + faint_time
@@ -857,7 +861,7 @@ class ccb(Star):
             yield event.plain_result(err)
             return
 
-        # 发起者虚弱检查（独立，与 /ccb 相同）
+        # 发起者神罚检查（独立，与 /ccb 相同）
         ban_msg = self.state.check_ban(send_id, user_name)
         if ban_msg:
             yield event.plain_result(ban_msg)
@@ -960,4 +964,150 @@ class ccb(Star):
             msg += (f"{i}. {nick} - 被扣：{int(rec.get(bh_num, 0))}次，"
                     f"累计喷出{float(rec.get(bh_vol, 0) or 0):.2f}ml，"
                     f"单次最高{bmax:.2f}ml\n")
+        yield event.plain_result(msg)
+
+    @filter.command("hn")
+    async def hn(self, event: AstrMessageEvent):
+        """
+        喝奈：从目标汲取奶喝（泌乳），记录喂养次数与泌乳量
+        用法：hn [@目标或QQ号]
+        """
+        group_id = str(event.get_group_id())
+        send_id = str(event.get_sender_id())
+        user_name = event.get_sender_name()
+        now = time.time()
+        # 目标解析：优先@，其次消息中的QQ号（需在本群），默认自己
+        target_user_id, err = await self.state.resolve_target(event, str(event.message_str), group_id)
+        if err:
+            yield event.plain_result(err)
+            return
+
+        # 神罚检查（独立）
+        ban_msg = self.state.check_ban(send_id, user_name)
+        if ban_msg:
+            yield event.plain_result(ban_msg)
+            return
+        # 昏厥检查（独立）
+        faint_msg = self.state.check_faint(send_id, user_name)
+        if faint_msg:
+            yield event.plain_result(faint_msg)
+            return
+
+        # 滑窗限流（与其他命令共用同一窗口计数与约束）
+        rate_msg = self.state.rate_limit(send_id, now)
+        if rate_msg:
+            yield event.plain_result(rate_msg)
+            return
+
+        # 无@自交：自取其乳（受 self_ccb 配置控制、白名单豁免）
+        if target_user_id == send_id:
+            if not self.state.selfdo:
+                chain = [Comp.Plain(f"{user_name}，暂时不允许自交哦！")]
+                yield event.chain_result(chain)
+                return
+            duration = round(random.uniform(0.1, 60), 2)
+            V = round(random.uniform(0.01, 100), 2)
+            if random.random() < self.state.crit_prob:
+                V = round(V * 2, 2)
+            rec, is_first = self.store.record_hn_stats(group_id, send_id, V, drinker=send_id)
+            if self.state.is_log:
+                try:
+                    self.store.append_log(group_id, send_id, send_id, duration, V)
+                except Exception as e:
+                    logger.warning(f"记录日志失败: {e}")
+            if is_first:
+                head = f"{user_name}的{V:.2f}ml初乳被ta自己喝掉了"
+            else:
+                head = f"{user_name}花费{duration}min自取其乳{V:.2f}ml"
+            chain = [
+                Comp.Plain(head),
+                Comp.Image.fromURL(get_avatar(send_id)),
+            ]
+            yield event.chain_result(chain)
+            return
+
+        # 禁C名单：主动与被动统一受控（喝奈不在豁免范围）
+        if send_id in self.state.white_list or target_user_id in self.state.white_list:
+            target_nick = await self._get_nickname(event, target_user_id)
+            yield event.plain_result(f"{target_nick}拒绝让你喝ta的奈奈")
+            return
+
+        duration = round(random.uniform(0.1, 60), 2)
+        V = round(random.uniform(0.01, 100), 2)
+        if random.random() < self.state.crit_prob:
+            V = round(V * 2, 2)
+
+        # 记录泌乳数据（hn.json），返回是否首次
+        rec, is_first = self.store.record_hn_stats(group_id, target_user_id, V, drinker=send_id)
+        target_nick = await self._get_nickname(event, target_user_id)
+
+        # 是否保留完整日志
+        if self.state.is_log:
+            try:
+                self.store.append_log(group_id, send_id, target_user_id, duration, V)
+            except Exception as e:
+                logger.warning(f"记录日志失败: {e}")
+
+        if is_first:
+            head = (f"{user_name}用{duration}min喝到了{target_nick}最有营养的{V:.2f}ml初乳，"
+                    f"这是{target_nick}第一次喂养群友")
+        else:
+            head = (f"{user_name}从{target_nick}用{duration}min喝到了{V:.2f}ml的奈奈，"
+                    f"这是{target_nick}第{int(rec.get(hn_num, 0))}次喂养群友")
+
+        chain = [
+            Comp.Plain(head),
+            Comp.Image.fromURL(get_avatar(target_user_id)),
+        ]
+        yield event.chain_result(chain)
+
+    @filter.command("hntop")
+    async def hntop(self, event: AstrMessageEvent):
+        """
+        泌乳排行榜：按喂养次数排行
+        """
+        group_id = str(event.get_group_id())
+        group = self.store.get_group_data("hn.json", group_id)
+
+        entries = [(uid, rec) for uid, rec in group.items() if int(rec.get(hn_num, 0) or 0) > 0]
+        if not entries:
+            yield event.plain_result("当前群暂无喝奈记录。")
+            return
+
+        top5 = sorted(entries, key=lambda x: int(x[1].get(hn_num, 0)), reverse=True)[:5]
+        msg = "🍼 泌乳排行榜 TOP5 🍼\n"
+        for i, (uid, rec) in enumerate(top5, 1):
+            nick = await self._get_nickname(event, uid)
+            msg += (f"{i}. {nick} 总共喂养了群友{int(rec.get(hn_num, 0))}次，"
+                    f"累计被喝{float(rec.get(hn_vol, 0) or 0):.2f}ml\n")
+        yield event.plain_result(msg)
+
+    @filter.command("hninfo")
+    async def hninfo(self, event: AstrMessageEvent):
+        """
+        查询泌乳信息：初乳被谁喝了、被喝史、单次最大泌乳量、累计泌乳量
+        用法：hninfo [@目标]
+        """
+        group_id = str(event.get_group_id())
+        target_user_id = self._get_target_user_id(event)
+
+        rec = self.store.get_group_data("hn.json", group_id).get(target_user_id, {})
+        if int(rec.get(hn_num, 0) or 0) <= 0:
+            yield event.plain_result("该用户暂无喝奈记录。")
+            return
+
+        # 初乳喝者（第一个喝到的人）
+        first_id = rec.get(hn_first)
+        first_nick = "未知"
+        if first_id:
+            first_nick = await self._get_nickname(event, first_id)
+        target_nick = await self._get_nickname(event, target_user_id)
+
+        msg = (
+            f"【{target_nick} 】\n"
+            f"• 初乳被喝：{first_nick}\n"
+            f"• 喂养：{int(rec.get(hn_num, 0))}次\n"
+            f"• 累计泌乳：{float(rec.get(hn_vol, 0) or 0):.2f}ml\n"
+            f"• 单次最大泌乳：{float(rec.get(hn_max, 0) or 0):.2f}ml"
+        )
         yield event.plain_result(msg)

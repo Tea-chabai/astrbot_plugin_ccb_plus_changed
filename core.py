@@ -1,6 +1,6 @@
 # -- coding: utf-8 --
 """
-逻辑层：状态管理（虚弱/昏厥/滑窗限流）、目标解析、自交演出。
+逻辑层：状态管理（神罚/昏厥/滑窗限流）、目标解析、自交演出。
 不直接读写文件——数据操作通过 DataStore 实例完成。
 """
 import random
@@ -25,7 +25,7 @@ def makeit(group_data, target_user_id):
 
 
 class StateKeeper:
-    """冷却状态（虚弱/昏厥/滑窗）与公共逻辑，运行时常驻内存"""
+    """冷却状态（神罚/昏厥/滑窗）与公共逻辑，运行时常驻内存"""
 
     def __init__(self, config):
         self.action_times = {}
@@ -33,7 +33,7 @@ class StateKeeper:
         self.faint_list = {}
         self.window = config.get("yw_window")                 # 滑动窗口长度（秒）
         self.threshold = config.get("yw_threshold")           # 窗口内最大允许动作次数
-        self.ban_duration = config.get("yw_ban_duration")     # 虚弱时长（秒）
+        self.ban_duration = config.get("yw_ban_duration")     # 神罚时长（秒）
         self.faint_duration = config.get("faint_ban_duration")    # 昏厥时长（秒，-1为随机）
         self.faint_random_min = config.get("faint_random_min")    # 昏厥随机最小时长（秒）
         self.faint_random_max = config.get("faint_random_max")    # 昏厥随机最大时长（秒）
@@ -50,13 +50,13 @@ class StateKeeper:
 
     # ---- 冷却检查 ----
     def check_ban(self, user_id: str, user_name: str) -> str:
-        """虚弱（阳痿）检查：处于虚弱期返回拦截消息（含触发用户昵称），否则返回 None"""
+        """神罚（阳痿）检查：处于神罚期返回拦截消息（含触发用户昵称），否则返回 None"""
         now = time.time()
         ban_end = self.ban_list.get(user_id, 0)
         if now < ban_end:
             remain = int(ban_end - now)
             m, s = divmod(remain, 60)
-            return f"{user_name}的虚弱还剩余 {m}分{s}秒"
+            return f"{user_name}正承受神罚，剩余 {m}分{s}秒"
         return None
 
     def check_faint(self, user_id: str, user_name: str) -> str:
@@ -77,7 +77,7 @@ class StateKeeper:
 
     # ---- 滑窗限流（ccb/dj/bh 共用同一窗口计数与约束）----
     def rate_limit(self, user_id: str, now: float) -> str:
-        """计入一次动作；超限则写入虚弱并返回提示消息，否则返回 None"""
+        """计入一次动作；超限则写入神罚并返回提示消息，否则返回 None"""
         times = self.action_times.setdefault(user_id, deque())
         while times and now - times[0] > self.window:
             times.popleft()
@@ -85,7 +85,7 @@ class StateKeeper:
         if len(times) > self.threshold:
             self.ban_list[user_id] = now + self.ban_duration
             times.clear()
-            return f"神明阻止了你的行为并给你上了{int(self.ban_duration // 60)}分钟的虚弱"
+            return f"神明阻止了你的行为并降下神罚，{int(self.ban_duration // 60)}分钟内无法行动"
         return None
 
     # ---- 目标解析 ----
