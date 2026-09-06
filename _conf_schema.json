@@ -85,6 +85,18 @@
     "default": false,
     "hint": "是否独立保留每一条ccb记录，包括双方与注入量。"
   },
+  "show_avatar": {
+    "description": "对他人行为显示头像",
+    "type": "bool",
+    "default": true,
+    "hint": "ccb/百合/喝奈等对他人互动时，是否附带对方头像图片。"
+  },
+  "show_self_avatar": {
+    "description": "自交行为显示头像",
+    "type": "bool",
+    "default": false,
+    "hint": "0721/dj/自取其乳等自交行为时，是否附带头像图片。"
+  },
   "faint_random_min": {
     "description": "昏厥随机最小时长（秒）",
     "type": "int",

@@ -47,6 +47,8 @@ class StateKeeper:
         self.selfdo = config.get("self_ccb", False)           # 是否允许自交（0721）
         self.white_list = config.get("white_list")            # 禁C名单
         self.is_log = config.get("is_log", False)             # 完整日志
+        self.show_avatar = config.get("show_avatar", True)    # 对他人行为是否显示头像
+        self.show_self_avatar = config.get("show_self_avatar", False)  # 自交是否显示头像
 
     # ---- 冷却检查 ----
     def check_ban(self, user_id: str, user_name: str) -> str:
@@ -145,7 +147,9 @@ class StateKeeper:
             Comp.Plain(head),
             Comp.Plain(stat),
         ]
+        # 自交头像按 show_self_avatar 配置显示
+        if self.show_self_avatar:
+            chain.insert(1, Comp.Image.fromURL(get_avatar(send_id)))
         if tail:
-            chain.append(Comp.Plain("----------------------------------\n"))
             chain.append(Comp.Plain(tail))
         return chain
