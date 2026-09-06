@@ -5,6 +5,8 @@
 """
 import json
 import os
+import sqlite3
+import time
 from pathlib import Path
 from astrbot.api import logger
 
@@ -68,11 +70,91 @@ def write_json(path: str, data):
         logger.error(f"写入数据错误: {e}")
 
 
+class DailyStore:
+    """
+    每日统计（sqlite）。每次行为写一条记录；每次操作前自动清理非今日数据，
+    等效于每日零点重置。长期累计数据仍由 JSON 文件（DataStore）保存。
+    行为类型 action: 'ccb' 互C | 'dj_b' 扣B | 'dj_d' 打胶 | 'bh' 百合 | 'hn' 喝奈
+    """
+
+    def __init__(self):
+        self.db_path = data_file("daily.db")
+        self._init_db()
+
+    def _conn(self):
+        return sqlite3.connect(self.db_path)
+
+    def _init_db(self):
+        try:
+            with self._conn() as conn:
+                conn.execute("""CREATE TABLE IF NOT EXISTS daily (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    group_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    vol REAL DEFAULT 0)""")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_gad ON daily(group_id, action, date)")
+        except Exception as e:
+            logger.error(f"初始化每日数据库失败: {e}")
+
+    def _today(self) -> str:
+        return time.strftime("%Y-%m-%d")
+
+    def _purge(self, conn):
+        """懒清理：删除非今日记录，实现每日重置"""
+        try:
+            conn.execute("DELETE FROM daily WHERE date != ?", (self._today(),))
+        except Exception as e:
+            logger.warning(f"清理每日数据失败: {e}")
+
+    def log(self, action: str, group_id: str, user_id: str, actor: str, vol: float):
+        """写入一条当日行为记录（user_id 为被统计者）"""
+        try:
+            with self._conn() as conn:
+                self._purge(conn)
+                conn.execute(
+                    "INSERT INTO daily(date, group_id, action, user_id, actor, vol) VALUES(?,?,?,?,?,?)",
+                    (self._today(), group_id, action, user_id, actor, round(float(vol), 2)),
+                )
+        except Exception as e:
+            logger.error(f"写入每日数据失败: {e}")
+
+    def rows(self, action: str, group_id: str) -> list:
+        """当日某行为的原始记录 [(user_id, actor, vol)]（按写入顺序）"""
+        try:
+            with self._conn() as conn:
+                self._purge(conn)
+                return conn.execute(
+                    "SELECT user_id, actor, vol FROM daily WHERE date = ? AND group_id = ? AND action = ? ORDER BY id",
+                    (self._today(), group_id, action),
+                ).fetchall()
+        except Exception as e:
+            logger.error(f"读取每日数据失败: {e}")
+            return []
+
+    def actor_count(self, action: str, group_id: str, actor_id: str) -> int:
+        """当日某人作为执行者（发起方）的次数"""
+        try:
+            with self._conn() as conn:
+                self._purge(conn)
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM daily WHERE date = ? AND group_id = ? AND action = ? AND actor = ?",
+                    (self._today(), group_id, action, actor_id),
+                ).fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.error(f"读取每日数据失败: {e}")
+            return 0
+
+
 class DataStore:
     """全部 JSON 数据的读写与统计更新"""
 
     def __init__(self, dj_mode: str = "B"):
         self.dj_mode = dj_mode
+        self.daily = DailyStore()   # 每日统计（sqlite）
 
     # ---- 基础读写 ----
     def read_ccb(self) -> dict:

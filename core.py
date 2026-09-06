@@ -128,6 +128,9 @@ class StateKeeper:
 
         rec, _ = store.record_dj_stats(group_id, send_id, V, mode="B")
 
+        # 每日统计写入（0721 自扣归入扣B）
+        store.daily.log("dj_b", group_id, send_id, send_id, V)
+
         if self.is_log:
             try:
                 store.append_log(group_id, send_id, send_id, duration, V)
