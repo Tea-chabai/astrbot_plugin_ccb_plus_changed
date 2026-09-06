@@ -35,7 +35,9 @@ HELP_INFO = """
 /dj 自交功能：按配置文件模式执行（B=扣B记录13水，d=打胶记录生命因子），不改变处女状态，可能昏厥（概率可配置）
 /bh 百合：和群友互扣，被扣的人喷出B水并记录，用法：bh [@目标或QQ号]
 /hn 喝奈：从目标汲取奶喝，无@时自取其乳，用法：hn [@或QQ号]（受禁C名单控制）
-/ccbclear   管理员指令：清除某人的所有 CCB 记录，用法：ccbclear [@目标]
+/ccbclear   管理员：清除某人的互C记录（dj_mode=d 时连带打胶），用法：ccbclear [@或QQ号]
+/bhclear   管理员：清除某人的百合记录（dj_mode=B 时连带自扣13水），用法：bhclear [@或QQ号]
+/hnclear   管理员：清除某人的喝奈记录（含他人记录中的痕迹），用法：hnclear [@或QQ号]
 /ccbnodo  管理员指令：切换目标禁C状态，用法：ccbnodo [@目标或QQ号]（禁C者不能主动C别人、也不能被C，但仍可自交）
 /timeclear   管理员指令：强制结束指定用户的神罚/昏厥冷却，用法：timeclear [@目标或QQ号]（不带目标默认清除自己）
 
@@ -384,13 +386,16 @@ class ccb(Star):
                 return
 
 
-    def _daily_agg(self, action: str, group_id: str) -> dict:
-        """当日行为记录聚合：{用户ID: {num, vol, max, first, max_actor}}"""
+    def _daily_agg(self, action: str, group_id: str, count_self: bool = True) -> dict:
+        """当日行为记录聚合：{用户ID: {num, vol, max, first, max_actor}}
+        count_self=False 时（喝奈自取）：user==actor 的自取行为不计入次数，
+        但泌乳量/单次最高/当日首喝仍纳入统计。"""
         rows = self.store.daily.rows(action, group_id)
         agg = {}
         for user_id, actor, vol in rows:
             d = agg.setdefault(user_id, {"num": 0, "vol": 0.0, "max": 0.0, "first": None, "max_actor": None})
-            d["num"] += 1
+            if count_self or user_id != actor:
+                d["num"] += 1
             d["vol"] = round(d["vol"] + float(vol), 2)
             if float(vol) > d["max"]:
                 d["max"] = round(float(vol), 2)
@@ -514,12 +519,13 @@ class ccb(Star):
         dj_num, dj_vol, dj_max = d.get("num", 0), d.get("vol", 0.0), d.get("max", 0.0)
         dj_label, dj_unit = ("打胶", "生命因子") if self.state.dj_mode == "d" else ("13水", "ml")
 
-        # 今日百合 / 喝奈
+        # 今日百合 / 喝奈（喝奈不计自取次数，但泌乳量算有记录）
         b = self._daily_agg("bh", group_id).get(target_user_id, {})
-        h = self._daily_agg("hn", group_id).get(target_user_id, {})
+        h = self._daily_agg("hn", group_id, count_self=False).get(target_user_id, {})
 
         # 今日完全无任何记录时直接提示（对齐 hninfo 的空数据提示）
-        if not (num or cb_total or dj_num or b.get("num", 0) or h.get("num", 0)):
+        if not (num or cb_total or dj_num or b.get("num", 0)
+                or h.get("num", 0) or h.get("vol", 0)):
             yield event.plain_result("该用户今日暂无任何记录。" + self._all_tip("ccbinfo"))
             return
 
@@ -542,7 +548,7 @@ class ccb(Star):
         if b.get("num", 0) > 0:
             msg += "\n• 百合：{:.2f}ml（被扣{}次，单次最高{:.2f}ml）".format(
                 b.get("vol", 0), b.get("num", 0), b.get("max", 0))
-        if h.get("num", 0) > 0:
+        if h.get("num", 0) > 0 or h.get("vol", 0) > 0:
             msg += "\n• 喝奈：{:.2f}ml（喂养{}次，单次最高{:.2f}ml）".format(
                 h.get("vol", 0), h.get("num", 0), h.get("max", 0))
         msg += self._all_tip("ccbinfo")
@@ -789,59 +795,105 @@ class ccb(Star):
 
         yield event.plain_result(msg)
 
-    # issue 6
+    # ---- 管理员数据清除：互C / 百合 / 喝奈 各自独立 ----
     @filter.command("ccbclear")
     async def ccbclear(self, event: AstrMessageEvent):
         """
-        管理员指令：清除某人的所有 CCB 记录
-        用法：ccbclear [@目标]
+        管理员指令：清除某人的互C记录
+        dj_mode=d 时（打胶/生命因子属互C体系）自交数据一并清除
+        用法：ccbclear [@目标或QQ号]
         """
-        group_id = str(event.get_group_id())
         if not await self._is_admin(event):
             yield event.plain_result("无权限使用此命令")
             return
+        group_id = str(event.get_group_id())
+        target_user_id, err = await self.state.resolve_target(event, str(event.message_str), group_id)
+        if err:
+            yield event.plain_result(err)
+            return
 
-        target_user_id = self._get_target_user_id(event)
+        removed_self, removed_from_others = self.store.remove_ccb_user(group_id, target_user_id)
 
-        all_data = self.store.read_ccb()
-        group_data = all_data.get(group_id, [])
-        if not isinstance(group_data, list):
-            group_data = []
+        dj_cleared = False
+        daily_deleted = self.store.daily.remove_user("ccb", group_id, target_user_id, also_actor=True)
+        if self.state.dj_mode == "d":
+            # 自交记录按配置归属：打胶（生命因子）随互C一起清除
+            dj_cleared = self.store.remove_self_user(group_id, target_user_id, "d")
+            daily_deleted += self.store.daily.remove_user("dj_d", group_id, target_user_id)
 
-        before_len = len(group_data)
-        group_data = [r for r in group_data if isinstance(r, dict) and r.get(a1) != target_user_id]
-        removed_self = before_len - len(group_data)
-
-        removed_from_others = 0
-        modified_records = []
-        for record in group_data:
-            if not isinstance(record, dict):
-                continue
-            ccb_by = record.get(a4, {}) or {}
-            if target_user_id in ccb_by:
-                try:
-                    removed_from_others += int(ccb_by[target_user_id].get("count", 0))
-                except Exception:
-                    removed_from_others += 0
-                del ccb_by[target_user_id]
-                record[a4] = ccb_by
-                record[a2] = sum(
-                    int(info.get("count", 0)) for info in ccb_by.values() if isinstance(info, dict)
-                )
-                modified_records.append(record)
-
-        for record in modified_records:
-            self.store.recalc_max(record)
-
-        all_data[group_id] = group_data
-        self.store.write_ccb(all_data)
-
+        nickname = await self._get_nickname(event, target_user_id)
         msg = (
-            f"已清除 {target_user_id} 的 CCB 记录：\n"
-            f"删除自身被CCB记录：{removed_self} 条\n"
-            f"移除ccb他人记录：{removed_from_others} 次\n"
-            f"相关记录已重新校准"
+            f"已清除 {nickname} 的互C记录：\n"
+            f"删除自身被C记录：{removed_self} 条\n"
+            f"摘除ta在他人记录中的痕迹：{removed_from_others} 次"
         )
+        if dj_cleared:
+            msg += "\n打胶（生命因子）记录已一并清除"
+        if daily_deleted > 0:
+            msg += f"\n今日统计已同步清除：{daily_deleted} 条"
+        if removed_from_others > 0:
+            msg += "\n相关记录已重新校准"
+        yield event.plain_result(msg)
+
+    @filter.command("bhclear")
+    async def bhclear(self, event: AstrMessageEvent):
+        """
+        管理员指令：清除某人的百合记录
+        dj_mode=B 时（扣B/13水属百合体系）自交数据一并清除
+        用法：bhclear [@目标或QQ号]
+        """
+        if not await self._is_admin(event):
+            yield event.plain_result("无权限使用此命令")
+            return
+        group_id = str(event.get_group_id())
+        target_user_id, err = await self.state.resolve_target(event, str(event.message_str), group_id)
+        if err:
+            yield event.plain_result(err)
+            return
+
+        removed_bh = self.store.remove_bh_user(group_id, target_user_id)
+
+        dj_cleared = False
+        daily_deleted = self.store.daily.remove_user("bh", group_id, target_user_id)
+        if self.state.dj_mode == "B":
+            # 自交记录按配置归属：扣B/13水（含百合并入的B_max）随百合一起清除
+            dj_cleared = self.store.remove_self_user(group_id, target_user_id, "B")
+            daily_deleted += self.store.daily.remove_user("dj_b", group_id, target_user_id)
+
+        nickname = await self._get_nickname(event, target_user_id)
+        msg = f"已清除 {nickname} 的百合记录：\n删除自身被扣记录：{int(removed_bh)} 条"
+        if dj_cleared:
+            msg += "\n自扣（13水/B_max）记录已一并清除"
+        if daily_deleted > 0:
+            msg += f"\n今日统计已同步清除：{daily_deleted} 条"
+        yield event.plain_result(msg)
+
+    @filter.command("hnclear")
+    async def hnclear(self, event: AstrMessageEvent):
+        """
+        管理员指令：清除某人的喝奈记录（含ta在他人记录中的被喝史/初乳痕迹）
+        用法：hnclear [@目标或QQ号]
+        """
+        if not await self._is_admin(event):
+            yield event.plain_result("无权限使用此命令")
+            return
+        group_id = str(event.get_group_id())
+        target_user_id, err = await self.state.resolve_target(event, str(event.message_str), group_id)
+        if err:
+            yield event.plain_result(err)
+            return
+
+        removed_self, traces = self.store.remove_hn_user(group_id, target_user_id)
+        daily_deleted = self.store.daily.remove_user("hn", group_id, target_user_id)
+
+        nickname = await self._get_nickname(event, target_user_id)
+        msg = (
+            f"已清除 {nickname} 的喝奈记录：\n"
+            f"删除自身记录：{removed_self} 条\n"
+            f"摘除他人记录中的痕迹：{traces} 处"
+        )
+        if daily_deleted > 0:
+            msg += f"\n今日统计已同步清除：{daily_deleted} 条"
         yield event.plain_result(msg)
 
     @filter.command("ccbnodo")
@@ -1234,8 +1286,9 @@ class ccb(Star):
             V = round(random.uniform(0.01, 100), 2)
             if random.random() < self.state.crit_prob:
                 V = round(V * 2, 2)
-            rec, is_first = self.store.record_hn_stats(group_id, send_id, V, drinker=send_id)
-            # 每日统计写入（自取）
+            # count=False：自取不计入喂养次数/被喝史，但泌乳量与初乳仍记录
+            rec, is_first = self.store.record_hn_stats(group_id, send_id, V, drinker=send_id, count=False)
+            # 每日统计写入（自取；聚合时该行不计次数，但计入泌乳量与当日首喝）
             self.store.daily.log("hn", group_id, send_id, send_id, V)
             if self.state.is_log:
                 try:
@@ -1295,11 +1348,13 @@ class ccb(Star):
     async def hntop(self, event: AstrMessageEvent):
         """今日泌乳榜"""
         group_id = str(event.get_group_id())
-        agg = self._daily_agg("hn", group_id)
-        if not agg:
+        agg = self._daily_agg("hn", group_id, count_self=False)
+        # 只对今日有喂养行为的人排行（自取不计次数，因此不上榜）
+        entries = [(uid, d) for uid, d in agg.items() if d["num"] > 0]
+        if not entries:
             yield event.plain_result("今日暂无喝奈记录。" + self._all_tip("hntop"))
             return
-        top5 = sorted(agg.items(), key=lambda x: x[1]["num"], reverse=True)[:5]
+        top5 = sorted(entries, key=lambda x: x[1]["num"], reverse=True)[:5]
         msg = "今日泌乳排行榜 TOP5：\n"
         for i, (uid, d) in enumerate(top5, 1):
             nick = await self._get_nickname(event, uid)
@@ -1336,9 +1391,10 @@ class ccb(Star):
         group_id = str(event.get_group_id())
         target_user_id = self._get_target_user_id(event)
         target_nick = await self._get_nickname(event, target_user_id)
-        d = self._daily_agg("hn", group_id).get(target_user_id, {})
+        d = self._daily_agg("hn", group_id, count_self=False).get(target_user_id, {})
         num = d.get("num", 0)
-        if num <= 0:
+        # 今日只有自取时 num=0，但当日首喝/泌乳量仍可展示；完全无记录才提示
+        if not d:
             yield event.plain_result("该用户今日暂无喝奈记录。" + self._all_tip("hninfo"))
             return
         first_id = d.get("first")
@@ -1363,7 +1419,8 @@ class ccb(Star):
         target_user_id = self._get_target_user_id(event)
 
         rec = self.store.get_group_data("hn.json", group_id).get(target_user_id, {})
-        if int(rec.get(hn_num, 0) or 0) <= 0:
+        # 自取不计次数：只自取过的用户 hn_num=0，但仍要展示初乳/泌乳信息
+        if int(rec.get(hn_num, 0) or 0) <= 0 and not rec.get(hn_first):
             yield event.plain_result("该用户暂无喝奈记录。")
             return
 

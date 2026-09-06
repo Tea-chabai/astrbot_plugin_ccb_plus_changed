@@ -148,6 +148,28 @@ class DailyStore:
             logger.error(f"读取每日数据失败: {e}")
             return 0
 
+    def remove_user(self, action: str, group_id: str, user_id: str, also_actor: bool = False) -> int:
+        """删除当日某行为中该用户作为被统计者的记录，返回删除条数。
+        also_actor=True 时连同其作为执行者（发起方）的记录一并删除（ccb 双向清理）"""
+        try:
+            with self._conn() as conn:
+                self._purge(conn)
+                if also_actor:
+                    cur = conn.execute(
+                        "DELETE FROM daily WHERE date = ? AND group_id = ? AND action = ? "
+                        "AND (user_id = ? OR actor = ?)",
+                        (self._today(), group_id, action, user_id, user_id),
+                    )
+                else:
+                    cur = conn.execute(
+                        "DELETE FROM daily WHERE date = ? AND group_id = ? AND action = ? AND user_id = ?",
+                        (self._today(), group_id, action, user_id),
+                    )
+                return int(cur.rowcount or 0)
+        except Exception as e:
+            logger.error(f"删除每日数据失败: {e}")
+            return 0
+
 
 class DataStore:
     """全部 JSON 数据的读写与统计更新"""
@@ -233,24 +255,118 @@ class DataStore:
         rec[a9] = max(float(rec.get(a9, 0) or 0), vol)
         write_json(data_file("dj_b.json"), data)
 
-    def record_hn_stats(self, group_id: str, user_id: str, vol: float, drinker: str) -> tuple:
+    def record_hn_stats(self, group_id: str, user_id: str, vol: float, drinker: str, count: bool = True) -> tuple:
         """
-        记录喝奈（泌乳）数据到 hn.json：喂养次数+1、泌乳累计、单次最大、被谁喝、初乳喝者。
-        drinker 为本次喝奶的人（目标自己喝时=user_id）。返回 (记录dict, 是否首次)
+        记录喝奈（泌乳）数据到 hn.json：泌乳累计、单次最大、初乳喝者。
+        count=True 时另计入喂养次数与被谁喝（drinker 为本次喝奶的人，目标自己喝时=user_id）。
+        count=False 表示自取（自己喝自己）：只累计泌乳量与初乳，不计入喂养次数/被喝史。
+        返回 (记录dict, 是否首次喝到初乳)
         """
         data = read_json(data_file("hn.json"))
         rec = data.setdefault(group_id, {}).setdefault(user_id, {})
-        is_first = int(rec.get(hn_num, 0) or 0) == 0
-        rec[hn_num] = int(rec.get(hn_num, 0)) + 1
-        rec[hn_vol] = round(float(rec.get(hn_vol, 0)) + vol, 2)
+        is_first = not rec.get(hn_first)
+        if count:
+            rec[hn_num] = int(rec.get(hn_num, 0) or 0) + 1
+            by = rec.setdefault(hn_by, {})
+            by[drinker] = int(by.get(drinker, 0)) + 1
+            rec[hn_by] = by
+        rec[hn_vol] = round(float(rec.get(hn_vol, 0) or 0) + vol, 2)
         rec[hn_max] = max(float(rec.get(hn_max, 0) or 0), vol)
         if is_first:
             rec[hn_first] = drinker
-        by = rec.setdefault(hn_by, {})
-        by[drinker] = int(by.get(drinker, 0)) + 1
-        rec[hn_by] = by
         write_json(data_file("hn.json"), data)
         return rec, is_first
+
+    # ---- 数据清除（管理员 clear 命令） ----
+    def remove_ccb_user(self, group_id: str, user_id: str) -> tuple:
+        """
+        双向清除某人的互C数据（ccb.json）：
+        删除自身记录；并把他从他人的 ccb_by（C过谁）中摘除、重算次数与标记。
+        返回 (删除自身记录数, 从他人记录中摘除的总次数)
+        """
+        all_data = self.read_ccb()
+        group_data = all_data.get(group_id, [])
+        if not isinstance(group_data, list):
+            group_data = []
+
+        before_len = len(group_data)
+        kept = [r for r in group_data if isinstance(r, dict) and r.get(a1) != user_id]
+        removed_self = before_len - len(kept)
+
+        removed_from_others = 0
+        for record in kept:
+            if not isinstance(record, dict):
+                continue
+            ccb_by = record.get(a4, {}) or {}
+            if user_id in ccb_by:
+                try:
+                    removed_from_others += int(ccb_by[user_id].get("count", 0))
+                except Exception:
+                    pass
+                del ccb_by[user_id]
+                record[a4] = ccb_by
+                record[a2] = sum(
+                    int(info.get("count", 0)) for info in ccb_by.values() if isinstance(info, dict)
+                )
+                self.recalc_max(record)
+
+        all_data[group_id] = kept
+        self.write_ccb(all_data)
+        return removed_self, removed_from_others
+
+    def remove_self_user(self, group_id: str, user_id: str, mode: str = "B") -> bool:
+        """清除某人的自交数据：mode="B" 清 dj_b.json（扣B/13水），否则清 dj.json（打胶/生命因子）。
+        是否真的删除了数据"""
+        name = "dj_b.json" if mode == "B" else "dj.json"
+        data = read_json(data_file(name))
+        group = data.get(group_id, {})
+        if isinstance(group, dict) and user_id in group:
+            del group[user_id]
+            data[group_id] = group
+            write_json(data_file(name), data)
+            return True
+        return False
+
+    def remove_bh_user(self, group_id: str, user_id: str) -> bool:
+        """清除某人的百合被扣数据（bh.json）"""
+        data = read_json(data_file("bh.json"))
+        group = data.get(group_id, {})
+        if isinstance(group, dict) and user_id in group:
+            del group[user_id]
+            data[group_id] = group
+            write_json(data_file("bh.json"), data)
+            return True
+        return False
+
+    def remove_hn_user(self, group_id: str, user_id: str) -> tuple:
+        """
+        双向清除某人的喝奈数据（hn.json）：
+        删除自身记录；并把他从他人的“被谁喝(hn_by)/初乳喝者(hn_first)”中摘除。
+        返回 (删除自身记录数, 从他人记录中摘除的痕迹数)
+        """
+        data = read_json(data_file("hn.json"))
+        group = data.get(group_id, {})
+        traces = 0
+        removed_self = 0
+        if isinstance(group, dict):
+            if user_id in group:
+                del group[user_id]
+                removed_self = 1
+            for rec in group.values():
+                if not isinstance(rec, dict):
+                    continue
+                by = rec.get(hn_by, {}) or {}
+                if user_id in by:
+                    del by[user_id]
+                    rec[hn_by] = by
+                    traces += 1
+                if rec.get(hn_first) == user_id:
+                    rec.pop(hn_first, None)
+                    traces += 1
+        if removed_self or traces:
+            data[group_id] = group
+            write_json(data_file("hn.json"), data)
+        return removed_self, traces
 
     # ---- 数据维护 ----
     def recalc_max(self, record: dict):
