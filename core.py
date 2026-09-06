@@ -143,7 +143,6 @@ class StateKeeper:
 
         chain = [
             Comp.Plain(head),
-            Comp.Image.fromURL(get_avatar(send_id)),
             Comp.Plain(stat),
         ]
         if tail:

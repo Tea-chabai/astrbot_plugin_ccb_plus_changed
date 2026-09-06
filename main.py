@@ -783,7 +783,6 @@ class ccb(Star):
             stat = f"这是ta的第{rec[num_k]}次。ta累积喷出了{rec[vol_k]}ml的13水。\n"
         chain = [
             Comp.Plain(head),
-            Comp.Image.fromURL(get_avatar(send_id)),
             Comp.Plain(stat),
         ]
         if random.random() < self.state.dj_faint_prob:
@@ -881,7 +880,7 @@ class ccb(Star):
         # 无@自交：与 /ccb 0721 相同的自交逻辑（受 self_ccb 配置控制、白名单豁免）
         if target_user_id == send_id:
             if not self.state.selfdo:
-                chain = [Comp.Plain(f"{user_name}，暂时不允许自交哦！")]
+                chain = [Comp.Plain(f"{user_name}，暂时不允许紫薇哦！")]
                 yield event.chain_result(chain)
                 return
             faint_time = self.state.faint_time()
@@ -1002,7 +1001,7 @@ class ccb(Star):
         # 无@自交：自取其乳（受 self_ccb 配置控制、白名单豁免）
         if target_user_id == send_id:
             if not self.state.selfdo:
-                chain = [Comp.Plain(f"{user_name}，暂时不允许自交哦！")]
+                chain = [Comp.Plain(f"{user_name}，暂时不允许自取其乳哦！")]
                 yield event.chain_result(chain)
                 return
             duration = round(random.uniform(0.1, 60), 2)
@@ -1019,11 +1018,7 @@ class ccb(Star):
                 head = f"{user_name}的{V:.2f}ml初乳被ta自己喝掉了"
             else:
                 head = f"{user_name}花费{duration}min自取其乳{V:.2f}ml"
-            chain = [
-                Comp.Plain(head),
-                Comp.Image.fromURL(get_avatar(send_id)),
-            ]
-            yield event.chain_result(chain)
+            yield event.chain_result([Comp.Plain(head)])
             return
 
         # 禁C名单：主动与被动统一受控（喝奈不在豁免范围）
@@ -1049,11 +1044,11 @@ class ccb(Star):
                 logger.warning(f"记录日志失败: {e}")
 
         if is_first:
-            head = (f"{user_name}用{duration}min喝到了{target_nick}最有营养的{V:.2f}ml初乳，"
-                    f"这是{target_nick}第一次喂养群友")
+            head = (f"{user_name}用{duration}min从{target_nick}那喝到了最有营养的{V:.2f}ml初乳，"
+                    f"这是ta第一次喂养群友")
         else:
-            head = (f"{user_name}从{target_nick}用{duration}min喝到了{V:.2f}ml的奈奈，"
-                    f"这是{target_nick}第{int(rec.get(hn_num, 0))}次喂养群友")
+            head = (f"{user_name}从{target_nick}那用{duration}min喝到了{V:.2f}ml的奈奈，"
+                    f"这是ta第{int(rec.get(hn_num, 0))}次喂养群友")
 
         chain = [
             Comp.Plain(head),
@@ -1079,7 +1074,7 @@ class ccb(Star):
         for i, (uid, rec) in enumerate(top5, 1):
             nick = await self._get_nickname(event, uid)
             msg += (f"{i}. {nick} 总共喂养了群友{int(rec.get(hn_num, 0))}次，"
-                    f"累计被喝{float(rec.get(hn_vol, 0) or 0):.2f}ml\n")
+                    f"累计泌乳{float(rec.get(hn_vol, 0) or 0):.2f}ml\n")
         yield event.plain_result(msg)
 
     @filter.command("hninfo")
