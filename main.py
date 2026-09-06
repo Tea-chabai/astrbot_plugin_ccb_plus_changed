@@ -179,7 +179,7 @@ class ccb(Star):
         # 禁C名单：名单内用户不能被他人ccb
         if target_user_id in self.state.white_list:
             nickname = await self._get_nickname(event, target_user_id)
-            yield event.plain_result(f"{nickname}对方拒绝了和你ccb/百合")
+            yield event.plain_result(f"{nickname}，对方拒绝了和你ccb/百合")
             return
 
         # CCB 逻辑
@@ -267,7 +267,7 @@ class ccb(Star):
                             chain = [
                                 Comp.Plain(f"{user_name} 和 {nickname} 发生了{duration}min长的ccb行为，{nickname}被注入了{V:.2f}ml的生命因子"),
                                 Comp.Plain(f"这是ta的第{item[a2]}次。ta被累积注入了{item[a3]}ml的生命因子。\n"),
-                                Comp.Plain(f"同时{nickname}现在正处于昏厥中,ta现在什么也干不了,剩余 {m1}分{s1}秒")
+                                Comp.Plain(f"同时{nickname}现在正处于昏厥中，ta现在什么也干不了，剩余 {m1}分{s1}秒")
                             ]
                             if self.state.show_avatar: chain.insert(1, Comp.Image.fromURL(pic))
                             yield event.chain_result(chain)
@@ -282,7 +282,7 @@ class ccb(Star):
                             chain = [
                                 Comp.Plain(f"{user_name} 和 {nickname} 发生了{duration}min长的ccb行为，{nickname}被注入了{V:.2f}ml的生命因子"),
                                 Comp.Plain(f"这是ta的第{item[a2]}次。ta被累积注入了{item[a3]}ml的生命因子。\n"),
-                                Comp.Plain(f"同时{nickname} 被 {user_name} C晕了,接下来ta将毫无还手之力,剩余 {m1}分{s1}秒")
+                                Comp.Plain(f"同时{nickname} 被 {user_name} C晕了，接下来ta将毫无还手之力，剩余 {m1}分{s1}秒")
                             ]
                             if self.state.show_avatar: chain.insert(1, Comp.Image.fromURL(pic))
                             yield event.chain_result(chain)
@@ -334,7 +334,7 @@ class ccb(Star):
                     chain = [
                     Comp.Plain(f"{user_name} 和 {nickname}发生了{duration}min长的ccb行为，{nickname}被注入了{V:.2f}ml的生命因子"),
                     Comp.Plain("这是ta的初体验~，你把人家的处给破了喵～要负责哦喵～\n"),
-                    Comp.Plain(f"同时{nickname}被{user_name}C晕了,接下来ta将毫无还手之力")
+                    Comp.Plain(f"同时{nickname}被{user_name}C晕了，接下来ta将毫无还手之力")
                     ]
                     if self.state.show_avatar: chain.insert(1, Comp.Image.fromURL(pic))
                     yield event.chain_result(chain)
@@ -769,7 +769,7 @@ class ccb(Star):
             # 打胶：打出生命因子，back.py 文案特供
             a = time_long(timep)
             b = volume(V)
-            head = f"{user_name}, 你坚持了{timep}s哦，{a}.射出了{V:.2f}ml的生命因子,{b}!"
+            head = f"{user_name}，你坚持了{timep}s哦，{a}。射出了{V:.2f}ml的生命因子，{b}！"
             stat = f"这是ta的第{rec[num_k]}次。ta累计射出了{rec[vol_k]}ml的生命因子。\n"
         else:
             # 扣B：13水，不使用 back.py 文案，正文带时长（与 ccb/bh 自交一致）
@@ -793,7 +793,7 @@ class ccb(Star):
                 self.state.faint_list[send_id] = now + faint_time
                 remain = int(faint_time)
                 m, s = divmod(remain, 60)
-                tail = f"同时{user_name} 不小心扣晕了,接下来ta什么也做不了（剩余 {m}分{s}秒）"
+                tail = f"同时{user_name} 不小心扣晕了，接下来ta什么也做不了（剩余 {m}分{s}秒）"
             chain.append(Comp.Plain(tail))
         yield event.chain_result(chain)
 
@@ -891,7 +891,7 @@ class ccb(Star):
         # 禁C名单：不能被百合
         if target_user_id in self.state.white_list:
             nickname = await self._get_nickname(event, target_user_id)
-            yield event.plain_result(f"{nickname}对方拒绝了和你ccb/百合")
+            yield event.plain_result(f"{nickname}，对方拒绝了和你ccb/百合")
             return
 
         duration = round(random.uniform(0.1, 60), 2)
@@ -926,12 +926,12 @@ class ccb(Star):
         if is_target_fainting:
             remain = int(faint_end_target - now)
             m, s = divmod(remain, 60)
-            tail = f"同时{nickname}现在正处于昏厥中,ta现在什么也干不了,剩余 {m}分{s}秒"
+            tail = f"同时{nickname}现在正处于昏厥中，ta现在什么也干不了，剩余 {m}分{s}秒"
         elif random.random() < self.state.faint_prob:
             self.state.faint_list[target_user_id] = now + faint_time
             remain = int(faint_time)
             m, s = divmod(remain, 60)
-            tail = f"同时{nickname}被{user_name}扣晕了,接下来ta将毫无还手之力,剩余 {m}分{s}秒"
+            tail = f"同时{nickname}被{user_name}扣晕了，接下来ta将毫无还手之力，剩余 {m}分{s}秒"
         else:
             tail = None
         if tail:
@@ -1014,7 +1014,7 @@ class ccb(Star):
             if is_first:
                 head = f"{user_name}的{V:.2f}ml初乳被ta自己喝掉了"
             else:
-                head = f"{user_name}花费{duration}min自取其乳{V:.2f}ml"
+                head = f"{user_name}花费{duration}min，自取其乳{V:.2f}ml"
             chain = [Comp.Plain(head)]
             # 自交头像按 show_self_avatar 配置显示
             if self.state.show_self_avatar:
@@ -1025,7 +1025,7 @@ class ccb(Star):
         # 禁C名单：主动与被动统一受控（喝奈不在豁免范围）
         if send_id in self.state.white_list or target_user_id in self.state.white_list:
             target_nick = await self._get_nickname(event, target_user_id)
-            yield event.plain_result(f"{target_nick}拒绝让你喝ta的奈奈")
+            yield event.plain_result(f"{target_nick}，拒绝让你喝ta的奈奈")
             return
 
         duration = round(random.uniform(0.1, 60), 2)

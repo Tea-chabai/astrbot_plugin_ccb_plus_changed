@@ -68,7 +68,7 @@ class StateKeeper:
         if now < faint_end:
             remain = int(faint_end - now)
             m, s = divmod(remain, 60)
-            return f"{user_name} 处于昏厥中剩余 {m}分{s}秒"
+            return f"{user_name} 处于昏厥中，剩余 {m}分{s}秒"
         return None
 
     def faint_time(self) -> float:
@@ -141,7 +141,7 @@ class StateKeeper:
             self.faint_list[send_id] = now + faint_time
             remain = int(faint_time)
             m, s = divmod(remain, 60)
-            tail = f"同时{user_name}不小心扣晕了,接下来ta什么也干不了（剩余 {m}分{s}秒）"
+            tail = f"同时{user_name}不小心扣晕了，接下来ta什么也干不了（剩余 {m}分{s}秒）"
 
         chain = [
             Comp.Plain(head),
