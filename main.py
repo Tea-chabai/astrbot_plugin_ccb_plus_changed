@@ -34,7 +34,7 @@ HELP_INFO = """
 行为命令：
 /dj 自交功能：按配置文件模式执行（B=扣B记录13水，d=打胶记录生命因子），不改变处女状态，可能昏厥（概率可配置）
 /bh 百合：和群友互扣，被扣的人喷出B水并记录，用法：bh [@目标或QQ号]
-/hn 喝奈：从目标汲取奶喝，无@时自取其乳，用法：hn [@或QQ号]（受禁C名单控制）
+/hnn 喝奈奈：从目标汲取奶喝，无@时自取其乳，用法：hnn [@或QQ号]（受禁C名单控制）
 /ccbclear   管理员：清除某人的互C记录（dj_mode=d 时连带打胶），用法：ccbclear [@或QQ号]
 /bhclear   管理员：清除某人的百合记录（dj_mode=B 时连带自扣13水），用法：bhclear [@或QQ号]
 /hnclear   管理员：清除某人的喝奈记录（含他人记录中的痕迹），用法：hnclear [@或QQ号]
@@ -1243,11 +1243,11 @@ class ccb(Star):
                     f"单次最高{bmax:.2f}ml\n")
         yield event.plain_result(msg)
 
-    @filter.command("hn")
-    async def hn(self, event: AstrMessageEvent):
+    @filter.command("hnn")
+    async def hnn(self, event: AstrMessageEvent):
         """
-        喝奈：从目标汲取奶喝（泌乳），记录喂养次数与泌乳量
-        用法：hn [@目标或QQ号]
+        喝奈奈：从目标汲取奶喝（泌乳），记录喂养次数与泌乳量
+        用法：hnn [@目标或QQ号]
         """
         group_id = str(event.get_group_id())
         send_id = str(event.get_sender_id())
