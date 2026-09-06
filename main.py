@@ -1331,10 +1331,10 @@ class ccb(Star):
                 logger.warning(f"记录日志失败: {e}")
 
         if is_first:
-            head = (f"{user_name} 用{duration}min从 {target_nick} 那喝到了最有营养的{V:.2f}ml初乳，"
+            head = (f"{user_name} 花费{duration}min从 {target_nick} 的身上喝到了最有营养的{V:.2f}ml初乳，"
                     f"这是 {target_nick} 第一次喂养群友")
         else:
-            head = (f"{user_name} 从 {target_nick} 那用{duration}min喝到了{V:.2f}ml的奈奈，"
+            head = (f"{user_name} 趴在 {target_nick} 的身上并花费{duration}min喝到了{V:.2f}ml的奈奈，"
                     f"这是 {target_nick} 第{int(rec.get(hn_num, 0))}次喂养群友")
 
         chain = [
