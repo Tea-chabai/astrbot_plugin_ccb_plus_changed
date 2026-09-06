@@ -83,7 +83,7 @@ AstrBot 配置面板可调：阳痿/昏厥概率与时长、窗口限流（次�
 
 ## 📥 安装
 
-1. 获取插件：release 下载 `source code.zip`，~~才不是 release 懒得更新~~ 或者直接 git clone / download zip
+1. 获取插件：直接 git clone / download zip ~~才不是 release 懒得更新~~ 
 2. AstrBot 管理面板 → 插件管理 → 本地插件安装，选择 zip 包
 
 > 此插件目前仍在更新，想要什么功能去 [issues](https://github.com/Koikokokokoro/astrbot_plugin_ccb_plus/issues) 提，能满足的尽量满足。
