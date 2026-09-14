@@ -502,7 +502,7 @@ async def hnn(inst, event):
             chain = [Comp.Plain(f"{user_name}，暂时不允许自取其乳哦！")]
             yield event.chain_result(chain)
             return
-        duration = round(random.uniform(0.1, 60), 2)
+        duration = round(random.uniform(1, 20), 2)   # 喝奈奈时长：1~20min
         V = round(random.uniform(0.01, 100), 2)
         if random.random() < inst.state.crit_prob:
             V = round(V * 2, 2)
@@ -532,7 +532,7 @@ async def hnn(inst, event):
         yield event.plain_result(f"{target_nick}，拒绝让你喝ta的奈奈")
         return
 
-    duration = round(random.uniform(0.1, 60), 2)
+    duration = round(random.uniform(1, 20), 2)   # 喝奈奈时长：1~20min
     V = round(random.uniform(0.01, 100), 2)
     if random.random() < inst.state.crit_prob:
         V = round(V * 2, 2)
